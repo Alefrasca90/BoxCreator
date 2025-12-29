@@ -1,7 +1,10 @@
 import tkinter as tk
 from tkinter import ttk
+import traceback
 
-# --- WIDGET UTILS ---
+# ==========================================
+# 1. WIDGET UTILS
+# ==========================================
 class CollapsibleSection(ttk.Frame):
     def __init__(self, parent, title, expanded=False):
         super().__init__(parent)
@@ -19,243 +22,303 @@ class CollapsibleSection(ttk.Frame):
         else:
             self.content_frame.pack_forget()
 
-# --- MODEL GEOMETRICO ---
+# ==========================================
+# 2. MOTORE GEOMETRICO (FIXED)
+# ==========================================
 class BoxModel:
     def __init__(self, params):
         self.p = params
-        self.base_gap = 2.0
+        self.base_gap = 2.0 
+
+    def _transform_point(self, pt, orientation):
+        """
+        Trasforma un punto (u, v) locale nel sistema globale (x, y).
+        u: Lunghezza lungo il lato di attacco.
+        v: Estensione verso l'esterno (v negativo = fuori).
+        """
+        x, y = pt
+        L = self.p['L']
+        W = self.p['W']
+
+        if orientation == 'top':
+            # Attaccato a y=0. v negativo va in alto.
+            return (x, y)
+        elif orientation == 'bottom':
+            # Attaccato a y=W. v negativo va in basso (y aumenta).
+            return (x, W - y)
+        elif orientation == 'left':
+            # Attaccato a x=0. Lunghezza (u) su Y. Estensione (v) su -X.
+            return (y, x)
+        elif orientation == 'right':
+            # Attaccato a x=L. Lunghezza (u) su Y. Estensione (v) su +X.
+            # v è negativo, quindi L - v diventa L + estensione.
+            return (L - y, x)
+        
+        # --- ANGOLI (Lembi interni) ---
+        # tl: Top-Left (Testata SX, lato alto).
+        elif orientation == 'tl': return (-x, -y) # va a sinistra e in alto
+        elif orientation == 'tr': return (L + x, -y) # va a destra e in alto
+        elif orientation == 'bl': return (-x, W + y) # va a sinistra e in basso
+        elif orientation == 'br': return (L + x, W + y) # va a destra e in basso
+        
+        return (x, y)
+
+    def _transform_list(self, pts_list, orientation):
+        return [self._transform_point(p, orientation) for p in pts_list]
 
     def _get_fianco_geometry(self, L_base, H_full, orientation):
-        """
-        Genera geometria fiancata con:
-        - Notch (Platform)
-        - U-Shape (Ferro di cavallo)
-        - Raddoppio (Rinforzo interno)
-        """
-        # --- PARAMETRI PIATTAFORMA ---
+        # Parametri
         has_platform = self.p.get('platform_active', False)
+        is_ferro = (self.p.get('fianchi_shape') == 'ferro')
+        has_reinf = is_ferro and self.p.get('fianchi_r_active', False)
+        
         notch_w, notch_h = 0, 0
         if has_platform:
             notch_h = self.p.get('plat_flap_w', 30) + self.p.get('plat_gap', 2)
             notch_w = self.p.get('fascia_h', 30) + self.p.get('plat_gap', 2)
+            if notch_h > H_full: notch_h = H_full - 5
 
-        # --- PARAMETRI FORMA ---
-        is_ferro = (self.p.get('fianchi_shape') == 'ferro')
         h_low = self.p.get('fianchi_h_low', H_full * 0.6)
-        shoulder = self.p.get('fianchi_shoulder', L_base * 0.2)
-        
-        # --- PARAMETRI RINFORZO ---
-        has_reinf = is_ferro and self.p.get('fianchi_r_active', False)
-        r_h = self.p.get('fianchi_r_h', 30)
-        r_gap = self.p.get('fianchi_r_gap', 2)
-
-        # Validazioni
-        if notch_h > H_full: notch_h = H_full - 5
         if h_low > H_full: h_low = H_full
-        min_shoulder = notch_w + 10
+        
+        shoulder = self.p.get('fianchi_shoulder', L_base * 0.2)
+        min_shoulder = notch_w + 5
         if is_ferro and shoulder < min_shoulder: shoulder = min_shoulder
         if shoulder * 2 > L_base: shoulder = L_base / 2 - 1
-        
-        # Validazione Rinforzo
-        # Altezza max rinforzo = h_low (altrimenti tocca il fondo quando piegato)
-        if r_h > h_low: r_h = h_low - 1 
-        # Larghezza disponibile
-        avail_w = L_base - 2*shoulder
-        if r_gap * 2 >= avail_w: r_gap = (avail_w / 2) - 5 # Safety
 
-        # --- COSTRUZIONE PUNTI LOCALI (0,0 = Base SX) ---
-        pts = []
-        extra_creases = [] # Liste di segmenti [(x1,y1), (x2,y2)]
-        
-        pts.append((0, 0)) 
-        
-        # LATO SX
-        if has_platform:
-            pts.append((0, -(H_full - notch_h)))
-            pts.append((notch_w, -(H_full - notch_h)))
-            pts.append((notch_w, -H_full))
-        else:
-            pts.append((0, -H_full))
-            
-        # TOP PROFILE
-        end_top_x = L_base - notch_w if has_platform else L_base
-        
-        if is_ferro:
-            # Spalla SX
-            pts.append((shoulder, -H_full))
-            pts.append((shoulder, -h_low))
-            
-            # --- ZONA CENTRALE (Rinforzo o Piatto) ---
-            if has_reinf:
-                # Disegna il raddoppio
-                # 1. Gap SX (spostamento verso centro)
-                pts.append((shoulder + r_gap, -h_low))
-                # 2. Salita Rinforzo
-                pts.append((shoulder + r_gap, -(h_low + r_h)))
-                # 3. Traversa Rinforzo
-                pts.append((L_base - shoulder - r_gap, -(h_low + r_h)))
-                # 4. Discesa Rinforzo
-                pts.append((L_base - shoulder - r_gap, -h_low))
-                # 5. Gap DX (spostamento verso spalla)
-                pts.append((L_base - shoulder, -h_low))
-                
-                # Aggiungi la CORDONATURA DI ATTACCO del rinforzo
-                # Collega punto 1 e punto 4 (nella sequenza locale sopra)
-                # Attenzione alle coordinate orientate dopo
-                c_start = (shoulder + r_gap, -h_low)
-                c_end = (L_base - shoulder - r_gap, -h_low)
-                extra_creases.append([c_start, c_end])
-            else:
-                # Ferro semplice
-                pts.append((L_base - shoulder, -h_low))
-
-            # Spalla DX
-            pts.append((L_base - shoulder, -H_full))
-            pts.append((end_top_x, -H_full))
-        else:
-            # Rect
-            pts.append((end_top_x, -H_full))
-            
-        # LATO DX
-        if has_platform:
-            pts.append((L_base - notch_w, -(H_full - notch_h)))
-            pts.append((L_base, -(H_full - notch_h)))
-            pts.append((L_base, 0))
-        else:
-            pts.append((L_base, 0))
-
-        # --- TRASFORMAZIONE ---
-        final_coords = []
-        for lx, ly in pts:
-            if orientation == 'top': final_coords.append((lx, ly))
-            elif orientation == 'bottom': final_coords.append((lx, -ly))
-
-        final_creases = []
-        for p1, p2 in extra_creases:
-            if orientation == 'top': final_creases.append([(p1[0], p1[1]), (p2[0], p2[1])])
-            elif orientation == 'bottom': final_creases.append([(p1[0], -p1[1]), (p2[0], -p2[1])])
-
-        # Highlight Spalla
-        final_sh_line = []
-        # (Omesso per brevità, non richiesto esplicitamente ora)
-
-        return final_coords, final_creases
-
-    def _get_testata_geometry(self, L_base, H_full, orientation):
-        """
-        Genera geometria testata con logica U-Shape e Rinforzo.
-        Platform/Split Fascia gestito separatamente.
-        """
-        # --- PARAMETRI ---
-        is_ferro = (self.p.get('testate_shape') == 'ferro')
-        h_low = self.p.get('testate_h_low', H_full * 0.6)
-        shoulder = self.p.get('testate_shoulder', L_base * 0.2)
-        
-        # --- RINFORZO ---
-        has_reinf = is_ferro and self.p.get('testate_r_active', False)
-        r_h = self.p.get('testate_r_h', 30)
-        r_gap = self.p.get('testate_r_gap', 2)
-
-        if h_low > H_full: h_low = H_full
-        if shoulder * 2 > L_base: shoulder = L_base / 2 - 1
-        
+        r_h = self.p.get('fianchi_r_h', 30)
+        r_gap = self.p.get('fianchi_r_gap', 2)
         if r_h > h_low: r_h = h_low - 1
         avail_w = L_base - 2*shoulder
         if r_gap * 2 >= avail_w: r_gap = (avail_w / 2) - 5
 
-        # --- PUNTI LOCALI (0,0 = Base SX) ---
-        pts = []
-        extra_creases = []
+        # --- PUNTI LOCALI (u, v) ---
+        # u va da 0 a L. v va da 0 a -H.
+        pts_poly = []
+        cuts = []
+        creases = []
         
-        pts.append((0, 0))
-        pts.append((0, -H_full))
+        curr = (0, 0)
+        pts_poly.append(curr)
+        
+        # 1. Lato Sinistro
+        if has_platform:
+            path = [(0, -(H_full - notch_h)), (notch_w, -(H_full - notch_h)), (notch_w, -H_full)]
+        else:
+            path = [(0, -H_full)]
+        for pt in path: cuts.append([curr, pt]); curr = pt; pts_poly.append(curr)
+
+        # 2. Profilo Superiore
+        p_sh_sx = (shoulder, -H_full)
+        p_u_sx = (shoulder, -h_low)
+        p_u_dx = (L_base - shoulder, -h_low)
+        p_sh_dx = (L_base - shoulder, -H_full)
+        target_dx = (L_base - notch_w, -H_full) if has_platform else (L_base, -H_full)
         
         if is_ferro:
-            pts.append((shoulder, -H_full))
-            pts.append((shoulder, -h_low))
+            cuts.append([curr, p_sh_sx]); curr = p_sh_sx; pts_poly.append(curr)
+            cuts.append([curr, p_u_sx]); curr = p_u_sx; pts_poly.append(curr)
             
             if has_reinf:
-                pts.append((shoulder + r_gap, -h_low))
-                pts.append((shoulder + r_gap, -(h_low + r_h)))
-                pts.append((L_base - shoulder - r_gap, -(h_low + r_h)))
-                pts.append((L_base - shoulder - r_gap, -h_low))
-                pts.append((L_base - shoulder, -h_low))
+                # Rinforzo Raddoppio
+                p_r_tl = (shoulder + r_gap, -h_low)
+                p_r_bl = (shoulder + r_gap, -(h_low + r_h))
+                p_r_br = (L_base - shoulder - r_gap, -(h_low + r_h))
+                p_r_tr = (L_base - shoulder - r_gap, -h_low)
                 
-                extra_creases.append([(shoulder + r_gap, -h_low), (L_base - shoulder - r_gap, -h_low)])
+                cuts.append([curr, p_r_tl]); curr = p_r_tl; pts_poly.append(curr)
+                cuts.append([curr, p_r_bl]); curr = p_r_bl; pts_poly.append(curr)
+                cuts.append([curr, p_r_br]); curr = p_r_br; pts_poly.append(curr)
+                cuts.append([curr, p_r_tr]); curr = p_r_tr; pts_poly.append(curr)
+                cuts.append([curr, p_u_dx]); curr = p_u_dx; pts_poly.append(curr)
+                creases.append([p_r_tl, p_r_tr])
             else:
-                pts.append((L_base - shoulder, -h_low))
-                
-            pts.append((L_base - shoulder, -H_full))
-            pts.append((L_base, -H_full))
-        else:
-            pts.append((L_base, -H_full))
+                cuts.append([curr, p_u_dx]); curr = p_u_dx; pts_poly.append(curr)
             
-        pts.append((L_base, 0))
+            cuts.append([curr, p_sh_dx]); curr = p_sh_dx; pts_poly.append(curr)
+            cuts.append([curr, target_dx]); curr = target_dx; pts_poly.append(curr)
+        else:
+            cuts.append([curr, target_dx]); curr = target_dx; pts_poly.append(curr)
+            
+        # 3. Lato Destro
+        if has_platform:
+            path = [(L_base - notch_w, -(H_full - notch_h)), (L_base, -(H_full - notch_h)), (L_base, 0)]
+        else:
+            path = [(L_base, 0)]
+        for pt in path: cuts.append([curr, pt]); curr = pt; pts_poly.append(curr)
 
-        # --- TRASFORMAZIONE ---
-        final_coords = []
-        for lx, ly in pts:
-            if orientation == 'left': final_coords.append((ly, lx))
-            elif orientation == 'right': final_coords.append((-ly, lx))
+        # Trasformazione Globale
+        g_poly = self._transform_list(pts_poly, orientation)
+        g_cuts = [self._transform_list(seg, orientation) for seg in cuts]
+        g_creases = [self._transform_list(seg, orientation) for seg in creases]
 
-        final_creases = []
-        for p1, p2 in extra_creases:
-            if orientation == 'left': final_creases.append([(p1[1], p1[0]), (p2[1], p2[0])])
-            elif orientation == 'right': final_creases.append([(-p1[1], p1[0]), (-p2[1], p2[0])])
+        return g_poly, g_cuts, g_creases
 
-        return final_coords, final_creases
-
-    def _get_platform_assembly(self, corner, h_testata):
-        # ... (Logica precedente invariata: Split Fascia e Lembi Esterni) ...
-        if not self.p.get('platform_active'): return [], [], []
+    def _get_testata_geometry(self, L_base, H_full, orientation):
         W = self.p['W']
-        H_t = h_testata
-        Fascia_H = self.p.get('fascia_h', 30)
-        Plat_W = self.p.get('plat_flap_w', 30)
-        is_testata_ferro = (self.p.get('testate_shape') == 'ferro')
+        is_ferro = (self.p.get('testate_shape') == 'ferro')
+        has_platform = self.p.get('platform_active', False)
+        
+        h_low = self.p.get('testate_h_low', H_full * 0.6)
+        if h_low > H_full: h_low = H_full
         shoulder = self.p.get('testate_shoulder', W * 0.2)
         if shoulder * 2 > W: shoulder = W / 2 - 1
         
-        fascia_polys, flap_polys = [], []
-        if is_testata_ferro:
-            fascia_polys.append([(0, H_t), (0, H_t + Fascia_H), (shoulder, H_t + Fascia_H), (shoulder, H_t)])
-            flap_polys.append([(-Plat_W, H_t), (-Plat_W, H_t + Fascia_H), (0, H_t + Fascia_H), (0, H_t)])
-            fascia_polys.append([(W-shoulder, H_t), (W-shoulder, H_t + Fascia_H), (W, H_t + Fascia_H), (W, H_t)])
-            flap_polys.append([(W, H_t), (W, H_t + Fascia_H), (W + Plat_W, H_t + Fascia_H), (W + Plat_W, H_t)])
+        has_reinf = is_ferro and self.p.get('testate_r_active', False)
+        r_h = self.p.get('testate_r_h', 30)
+        r_gap = self.p.get('testate_r_gap', 2)
+        if r_h > h_low: r_h = h_low - 1
+        avail_w = W - 2*shoulder
+        if r_gap * 2 >= avail_w: r_gap = (avail_w / 2) - 5
+
+        # Punti Locali (u=0..W, v=0..-H)
+        curr = (0, 0)
+        pts_poly = [curr]
+        cuts, creases = [], []
+        
+        # Lato SX (Attacco Lembo 1)
+        target = (0, -H_full)
+        creases.append([curr, target]); curr = target; pts_poly.append(curr)
+        
+        # Profilo Superiore
+        if is_ferro:
+            p_sh_sx = (shoulder, -H_full)
+            p_u_sx = (shoulder, -h_low)
+            p_u_dx = (W - shoulder, -h_low)
+            p_sh_dx = (W - shoulder, -H_full)
+            
+            # Spalla SX
+            if has_platform: creases.append([curr, p_sh_sx])
+            else: cuts.append([curr, p_sh_sx])
+            curr = p_sh_sx; pts_poly.append(curr)
+            
+            # Discesa
+            cuts.append([curr, p_u_sx]); curr = p_u_sx; pts_poly.append(curr)
+            
+            # Centro (Rinforzo o Piatto)
+            if has_reinf:
+                p_r_tl = (shoulder + r_gap, -h_low)
+                p_r_bl = (shoulder + r_gap, -(h_low + r_h))
+                p_r_br = (W - shoulder - r_gap, -(h_low + r_h))
+                p_r_tr = (W - shoulder - r_gap, -h_low)
+                
+                cuts.append([curr, p_r_tl]); curr = p_r_tl; pts_poly.append(curr)
+                cuts.append([curr, p_r_bl]); curr = p_r_bl; pts_poly.append(curr)
+                cuts.append([curr, p_r_br]); curr = p_r_br; pts_poly.append(curr)
+                cuts.append([curr, p_r_tr]); curr = p_r_tr; pts_poly.append(curr)
+                cuts.append([curr, p_u_dx]); curr = p_u_dx; pts_poly.append(curr)
+                creases.append([p_r_tl, p_r_tr])
+            else:
+                cuts.append([curr, p_u_dx]); curr = p_u_dx; pts_poly.append(curr)
+            
+            # Risalita
+            cuts.append([curr, p_sh_dx]); curr = p_sh_dx; pts_poly.append(curr)
+            
+            # Spalla DX
+            target = (W, -H_full)
+            if has_platform: creases.append([curr, target])
+            else: cuts.append([curr, target])
+            curr = target; pts_poly.append(curr)
         else:
-            fascia_polys.append([(0, H_t), (0, H_t + Fascia_H), (W, H_t + Fascia_H), (W, H_t)])
-            flap_polys.append([(-Plat_W, H_t), (-Plat_W, H_t + Fascia_H), (0, H_t + Fascia_H), (0, H_t)])
-            flap_polys.append([(W, H_t), (W, H_t + Fascia_H), (W + Plat_W, H_t + Fascia_H), (W + Plat_W, H_t)])
+            # Rect
+            target = (W, -H_full)
+            if has_platform: creases.append([curr, target])
+            else: cuts.append([curr, target])
+            curr = target; pts_poly.append(curr)
+            
+        # Lato Destro
+        creases.append([curr, (W, 0)]); curr = (W, 0); pts_poly.append(curr)
+        
+        # Trasformazione Testata Base
+        g_poly = self._transform_list(pts_poly, orientation)
+        g_cuts = [self._transform_list(seg, orientation) for seg in cuts]
+        g_creases = [self._transform_list(seg, orientation) for seg in creases]
+        
+        # Assembly Platform
+        if has_platform:
+            plat_polys, plat_cr, plat_ct = self._get_platform_assembly(orientation, H_full)
+            # Uniamo tutto in liste uniche
+            # plat_polys è una lista di dict: {'coords': ...}
+            # Restituiamo una struttura coerente
+            return [{'coords': g_poly, 'color': 'white'}] + plat_polys, g_cuts + plat_ct, g_creases + plat_cr
+        else:
+            return [{'coords': g_poly, 'color': 'white'}], g_cuts, g_creases
 
-        polys, creases, cuts = [], [], []
-        def transform(u, v):
-            if corner == 'left': return (-v, u)
-            else: return (self.p['L'] + v, u)
+    def _get_platform_assembly(self, orientation, H_t):
+        """
+        Genera Fascia e Lembi Esterni.
+        Restituisce direttamente oggetti ruotati nel sistema globale.
+        """
+        W = self.p['W']
+        Fascia_H = self.p.get('fascia_h', 30)
+        Plat_W = self.p.get('plat_flap_w', 30)
+        is_ferro = (self.p.get('testate_shape') == 'ferro')
+        shoulder = self.p.get('testate_shoulder', W * 0.2)
+        if shoulder * 2 > W: shoulder = W / 2 - 1
 
-        for raw_f in fascia_polys:
-            g_fascia = [transform(u, v) for u,v in raw_f]
-            polys.append({'id': 'poly_platform', 'coords': g_fascia, 'color': '#E3F2FD'})
-            creases.append([g_fascia[0], g_fascia[3]]) 
-            cuts.append([g_fascia[1], g_fascia[2]])
-            if is_testata_ferro:
-                u_sx = raw_f[0][0]
-                if u_sx == 0 or u_sx == W: pass 
-                else: cuts.append([g_fascia[0], g_fascia[1]])
-                u_dx = raw_f[2][0]
-                if u_dx == 0 or u_dx == W: pass 
-                else: cuts.append([g_fascia[2], g_fascia[3]])
+        # Coordinate LOCALI relative alla testata (u, v)
+        # u=0..W, v=-H..-(H+Fascia)
+        # Nota: nel sistema locale del metodo _transform_point, v negativo è estensione.
+        # Qui Fascia_H estende oltre H_t. Quindi v va da -H_t a -(H_t + Fascia_H).
+        
+        parts_local = [] # (PolyPts, Creases, Cuts, Color)
+        
+        def create_unit(u_s, u_e, left_flap, right_flap):
+            # Fascia
+            # Punti: BL, TL, TR, BR (Bottom=attacco testata, Top=esterno)
+            # v_base = -H_t, v_top = -(H_t + Fascia_H)
+            v_b, v_t = -H_t, -(H_t + Fascia_H)
+            
+            f_poly = [(u_s, v_b), (u_s, v_t), (u_e, v_t), (u_e, v_b)]
+            f_cr = [[(u_s, v_b), (u_e, v_b)]] # Attacco basso
+            f_ct = [[(u_s, v_t), (u_e, v_t)]] # Lato alto
+            
+            # Lembo SX
+            if left_flap:
+                f_cr.append([(u_s, v_b), (u_s, v_t)]) # Piega verticale
+                l_poly = [(u_s-Plat_W, v_b), (u_s-Plat_W, v_t), (u_s, v_t), (u_s, v_b)]
+                l_ct = [
+                    [(u_s-Plat_W, v_b), (u_s-Plat_W, v_t)], # Lato esterno
+                    [(u_s-Plat_W, v_t), (u_s, v_t)],       # Top
+                    [(u_s, v_b), (u_s-Plat_W, v_b)]        # Bot
+                ]
+                parts_local.append((l_poly, [], l_ct, '#90CAF9'))
+            else:
+                f_ct.append([(u_s, v_b), (u_s, v_t)]) # Taglio verticale fascia
+            
+            # Lembo DX
+            if right_flap:
+                f_cr.append([(u_e, v_b), (u_e, v_t)])
+                r_poly = [(u_e, v_b), (u_e, v_t), (u_e+Plat_W, v_t), (u_e+Plat_W, v_b)]
+                r_ct = [
+                    [(u_e, v_t), (u_e+Plat_W, v_t)],
+                    [(u_e+Plat_W, v_t), (u_e+Plat_W, v_b)],
+                    [(u_e+Plat_W, v_b), (u_e, v_b)]
+                ]
+                parts_local.append((r_poly, [], r_ct, '#90CAF9'))
+            else:
+                f_ct.append([(u_e, v_b), (u_e, v_t)])
+            
+            parts_local.append((f_poly, f_cr, f_ct, '#E3F2FD'))
 
-        for raw_p in flap_polys:
-            g_poly = [transform(u, v) for u,v in raw_p]
-            polys.append({'id': 'poly_platform_flap', 'coords': g_poly, 'color': '#90CAF9'})
-            creases.append([g_poly[2], g_poly[3]]) 
-            cuts.append([g_poly[0], g_poly[1]])
-            cuts.append([g_poly[1], g_poly[2]])
-            cuts.append([g_poly[3], g_poly[0]])
-        return polys, creases, cuts
+        if is_ferro:
+            create_unit(0, shoulder, True, False)
+            create_unit(W-shoulder, W, False, True)
+        else:
+            create_unit(0, W, True, True)
+
+        # Trasformazione Globale
+        g_polys, g_cr, g_ct = [], [], []
+        
+        for poly, cr, ct, col in parts_local:
+            g_p = self._transform_list(poly, orientation)
+            g_polys.append({'coords': g_p, 'color': col})
+            g_cr.extend([self._transform_list(s, orientation) for s in cr])
+            g_ct.extend([self._transform_list(s, orientation) for s in ct])
+            
+        return g_polys, g_cr, g_ct
 
     def _get_flap_geo(self, corner, h_testata, f_len):
-        # ... (Logica precedente invariata: Lembi Interni con Gap) ...
         T = self.p.get('thickness', 3.0)
         gap = self.base_gap + T 
         is_ferro = (self.p.get('fianchi_shape') == 'ferro')
@@ -266,12 +329,14 @@ class BoxModel:
         
         cut_depth = h_fianco_full - h_fianco_low
         if cut_depth < 0: cut_depth = 0
+        
         u_inner = gap
         gap_outer = gap if has_platform else 0
         u_outer = h_testata - gap_outer
         u_outer_low = u_outer - cut_depth
         if u_outer < u_inner: u_outer = u_inner + 1
         
+        # Punti Locali (u=larghezza, v=estensione)
         pts_local = []
         if is_ferro and f_len > shoulder:
             pts_local = [(u_inner, 0), (u_inner, f_len), (u_outer_low, f_len),
@@ -279,120 +344,83 @@ class BoxModel:
         else:
             pts_local = [(u_inner, 0), (u_inner, f_len), (u_outer, f_len), (u_outer, 0)]
 
-        final_pts, cuts = [], []
-        for u, v in pts_local:
-            gx, gy = 0, 0
-            if corner == 'tl': gx, gy = -u, -v
-            elif corner == 'tr': gx, gy = self.p['L'] + u, -v
-            elif corner == 'bl': gx, gy = -u, self.p['W'] + v
-            elif corner == 'br': gx, gy = self.p['L'] + u, self.p['W'] + v
-            final_pts.append((gx, gy))
+        # Trasformazione Corner
+        final_pts = self._transform_list(pts_local, corner)
+        
+        cuts = []
         for i in range(len(final_pts)-1): cuts.append([final_pts[i], final_pts[i+1]])
-        return final_pts, cuts
+        crease = [final_pts[0], final_pts[-1]]
+        return final_pts, cuts, crease
 
     def get_data(self):
-        polygons, cut_lines, crease_lines, dimensions = [], [], [], []
+        """Assembla tutto e applica Offset"""
+        polygons, cut_lines, crease_lines = [], [], []
         L = self.p['L']; W = self.p['W']
         H_f = self.p['h_fianchi']; H_t = self.p['h_testate']; F = self.p['F']
         
         Fascia_H = self.p.get('fascia_h', 0) if self.p.get('platform_active') else 0
         Plat_W = self.p.get('plat_flap_w', 0) if self.p.get('platform_active') else 0
         
+        # Offset centratura
         ox = max(H_t + Fascia_H, H_f) + Plat_W + 50
         oy = max(H_t + Fascia_H, H_f) + F + 30 
 
         # 1. FONDO
-        base_pts = [(ox, oy), (ox+L, oy), (ox+L, oy+W), (ox, oy+W)]
-        polygons.append({'id': 'poly_fondo', 'coords': base_pts, 'color': '#EEEEEE'})
-        for i in range(4): crease_lines.append([base_pts[i], base_pts[(i+1)%4]])
+        base_pts = [(0, 0), (L, 0), (L, W), (0, W)]
+        base_off = [(x+ox, y+oy) for x,y in base_pts]
+        polygons.append({'id': 'poly_fondo', 'coords': base_off, 'color': '#EEEEEE'})
+        for i in range(4): crease_lines.append([base_off[i], base_off[(i+1)%4]])
 
         # 2. FIANCATE
         for orient in ['top', 'bottom']:
-            pts, extra_cr = self._get_fianco_geometry(L, H_f, orient)
-            poly_pts = [(x+ox, y+oy) if orient=='top' else (x+ox, y+oy+W) for x,y in pts]
-            
-            polygons.append({'id': 'poly_fianchi', 'coords': poly_pts, 'color': 'white'})
-            for i in range(len(poly_pts)-1): cut_lines.append([poly_pts[i], poly_pts[i+1]])
-            
-            # Cordonatura Rinforzo (Sovrascriviamo il taglio base se presente? No, è extra)
-            # In realtà il segmento del rinforzo che si attacca al fianco (extra_cr)
-            # deve sostituire il segmento di taglio che c'era lì.
-            # Ma il poly_pts include il perimetro del rinforzo.
-            # L'extra_cr è la linea che chiude il rinforzo verso il basso.
-            # Aspetta: nel poly_pts ho disegnato il rinforzo.
-            # La linea di piega è quella "dentro" il poligono che connette i gap.
-            for cr in extra_cr:
-                crease_lines.append([(p[0]+ox, p[1]+oy + (0 if orient=='top' else W)) for p in cr])
+            g_poly, g_cuts, g_creases = self._get_fianco_geometry(L, H_f, orient)
+            poly_off = [(x+ox, y+oy) for x,y in g_poly]
+            polygons.append({'id': 'poly_fianchi', 'coords': poly_off, 'color': 'white'})
+            for c in g_cuts: cut_lines.append([(p[0]+ox, p[1]+oy) for p in c])
+            for c in g_creases: crease_lines.append([(p[0]+ox, p[1]+oy) for p in c])
 
         # 3. TESTATE
         for orient in ['left', 'right']:
-            pts, extra_cr = self._get_testata_geometry(W, H_t, orient)
-            off_x = ox if orient=='left' else ox+L
-            poly_pts = [(x+off_x, y+oy) for x,y in pts]
+            # poly_items è lista di dict [{'coords':..., 'color':...}]
+            poly_items, g_cuts, g_creases = self._get_testata_geometry(W, H_t, orient)
             
-            polygons.append({'id': 'poly_testate', 'coords': poly_pts, 'color': 'white'})
-            
-            # Platform Logic
-            if self.p.get('platform_active'):
-                plat_polys, plat_creases, plat_cuts = self._get_platform_assembly(orient, H_t)
-                for pp in plat_polys:
-                    pp['coords'] = [(x+off_x, y+oy) for x,y in pp['coords']]
-                    polygons.append(pp)
-                for pc in plat_creases: crease_lines.append([(p[0]+off_x, p[1]+oy) for p in pc])
-                for pcut in plat_cuts: cut_lines.append([(p[0]+off_x, p[1]+oy) for p in pcut])
+            for item in poly_items:
+                coords_off = [(x+ox, y+oy) for x,y in item['coords']]
+                item_copy = item.copy(); item_copy['coords'] = coords_off
+                if 'id' not in item_copy: item_copy['id'] = 'poly_testate' # Default ID
+                polygons.append(item_copy)
                 
-                # Attacchi Testata
-                if self.p.get('testate_shape') == 'ferro':
-                    # U-Shape + Platform
-                    # Perimetro esterno:
-                    # 0=BaseTop, 1=TopExt, 2=ShoulderExt ...
-                    # Shoulder Top sono indici 1 e ...
-                    # Con Rinforzo attivo, poly_pts è più complesso.
-                    # Semplificazione: Disegniamo tutto il perimetro come taglio
-                    # E sovrascriviamo le pieghe note.
-                    for i in range(len(poly_pts)-1): cut_lines.append([poly_pts[i], poly_pts[i+1]])
-                    
-                    # Sovrascrivi pieghe attacco fascia (Top Shoulders)
-                    # Punti 1->2 (Spalla SX) e ... difficile tracciare indici dinamici.
-                    # Usiamo coordinate geometriche note: H_t
-                    # Se un segmento è orizzontale a distanza H_t (o -H_t), è una piega fascia.
-                    # Se un segmento è verticale a distanza 0 o W, è una piega lembo.
-                    pass # (Gestito visualmente sopra dal verde che copre il nero se disegnato dopo)
-                else:
-                    crease_lines.append([poly_pts[1], poly_pts[2]])
-            else:
-                for i in range(len(poly_pts)-1): cut_lines.append([poly_pts[i], poly_pts[i+1]])
-            
-            # Base Testata Piega
-            crease_lines.append([poly_pts[0], poly_pts[1]]) # Lembo 1
-            crease_lines.append([poly_pts[-2], poly_pts[-1]]) # Lembo 2
-            
-            # Piega Rinforzo Testata
-            for cr in extra_cr:
-                crease_lines.append([(p[0]+off_x, p[1]+oy) for p in cr])
+            for c in g_cuts: cut_lines.append([(p[0]+ox, p[1]+oy) for p in c])
+            for c in g_creases: crease_lines.append([(p[0]+ox, p[1]+oy) for p in c])
 
-        # 4. LEMBI INTERNI
+        # 4. LEMBI
         for c in ['tl', 'tr', 'bl', 'br']:
-            pts, cuts = self._get_flap_geo(c, H_t, F)
-            pts_off = [(x+ox, y+oy) for x,y in pts]
-            cuts_off = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in cuts]
+            g_pts, g_cuts, g_crease = self._get_flap_geo(c, H_t, F)
+            pts_off = [(x+ox, y+oy) for x,y in g_pts]
+            cuts_off = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in g_cuts]
+            crease_off = [(p[0]+ox, p[1]+oy) for p in g_crease]
+            
             polygons.append({'id': 'poly_lembi', 'coords': pts_off, 'color': 'white'})
             cut_lines.extend(cuts_off)
-            crease_lines.append([pts_off[0], pts_off[-1]])
+            crease_lines.append(crease_off)
 
-        return polygons, cut_lines, crease_lines, dimensions
+        return polygons, cut_lines, crease_lines
 
-# --- APP ---
+# ==========================================
+# 3. APP PRINCIPALE
+# ==========================================
 class PackagingApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Packaging CAD - Reinforcement & Platform")
-        self.geometry("1350x950")
+        self.title("Packaging CAD - Final Fixed")
+        self.geometry("1400x950")
         s = ttk.Style()
         s.configure("Toggle.TButton", font=("Segoe UI", 10, "bold"))
         self.params_vars = {}
+        
         self.paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         self.paned.pack(fill=tk.BOTH, expand=True)
+        
         self.canvas_scroll = tk.Canvas(self.paned, width=420, bg="#f5f5f5")
         self.scrollbar = ttk.Scrollbar(self.paned, orient="vertical", command=self.canvas_scroll.yview)
         self.scroll_frame = ttk.Frame(self.canvas_scroll)
@@ -401,10 +429,12 @@ class PackagingApp(tk.Tk):
         self.canvas_scroll.configure(yscrollcommand=self.scrollbar.set)
         self.paned.add(self.canvas_scroll, weight=0)
         self.paned.add(self.scrollbar, weight=0)
+        
         self.draw_frame = ttk.Frame(self.paned)
         self.paned.add(self.draw_frame, weight=3)
         self.canvas = tk.Canvas(self.draw_frame, bg="white")
         self.canvas.pack(fill=tk.BOTH, expand=True)
+        
         self.build_ui()
         self.canvas.bind("<Configure>", lambda e: self.refresh())
         self.after(200, self.refresh)
@@ -412,13 +442,11 @@ class PackagingApp(tk.Tk):
     def build_ui(self):
         ttk.Label(self.scroll_frame, text="Parametri Progetto", font=("Segoe UI", 16, "bold")).pack(pady=15)
         
-        # FONDO
         sec = CollapsibleSection(self.scroll_frame, "1. Fondo", expanded=True)
         sec.pack(fill="x", pady=2)
         self.add_entry(sec.content_frame, "Lunghezza", "L", 400); self.add_entry(sec.content_frame, "Larghezza", "W", 300)
         self.add_entry(sec.content_frame, "Spessore", "thickness", 5.0)
         
-        # FIANCATE
         sec = CollapsibleSection(self.scroll_frame, "2. Fiancate", expanded=True)
         sec.pack(fill="x", pady=2)
         self.add_entry(sec.content_frame, "Altezza", "h_fianchi", 100)
@@ -427,35 +455,32 @@ class PackagingApp(tk.Tk):
         self.f_ferro_frame = ttk.Frame(sec.content_frame); self.f_ferro_frame.pack(fill="x", padx=10)
         self.add_entry(self.f_ferro_frame, "Altezza Min", "fianchi_h_low", 60)
         self.add_entry(self.f_ferro_frame, "Spalla", "fianchi_shoulder", 80)
-        # Rinforzo Fiancate
         self.params_vars['fianchi_r_active'] = tk.BooleanVar(value=True)
         ttk.Checkbutton(self.f_ferro_frame, text="Raddoppio (Rinforzo)", variable=self.params_vars['fianchi_r_active'], command=self.refresh).pack(anchor="w", pady=5)
         self.add_entry(self.f_ferro_frame, "Alt. Rinforzo", "fianchi_r_h", 40)
         self.add_entry(self.f_ferro_frame, "Gap Lat. Rinf.", "fianchi_r_gap", 2)
         
-        # TESTATE
-        sec = CollapsibleSection(self.scroll_frame, "3. Testate")
+        sec = CollapsibleSection(self.scroll_frame, "3. Testate", expanded=True)
         sec.pack(fill="x", pady=2)
         self.add_entry(sec.content_frame, "Altezza", "h_testate", 100)
-        self.params_vars['testate_shape'] = tk.StringVar(value="rect")
+        self.params_vars['testate_shape'] = tk.StringVar(value="ferro")
         ttk.Checkbutton(sec.content_frame, text="Ferro di Cavallo", variable=self.params_vars['testate_shape'], onvalue="ferro", offvalue="rect", command=self.refresh).pack(anchor="w")
-        self.t_ferro_frame = ttk.Frame(sec.content_frame)
+        self.t_ferro_frame = ttk.Frame(sec.content_frame); self.t_ferro_frame.pack(fill="x", padx=10)
         self.add_entry(self.t_ferro_frame, "Altezza Min", "testate_h_low", 60)
         self.add_entry(self.t_ferro_frame, "Spalla", "testate_shoulder", 50)
-        # Rinforzo Testate
-        self.params_vars['testate_r_active'] = tk.BooleanVar(value=False)
+        self.params_vars['testate_r_active'] = tk.BooleanVar(value=True)
         ttk.Checkbutton(self.t_ferro_frame, text="Raddoppio (Rinforzo)", variable=self.params_vars['testate_r_active'], command=self.refresh).pack(anchor="w", pady=5)
         self.add_entry(self.t_ferro_frame, "Alt. Rinforzo", "testate_r_h", 30)
+        self.add_entry(self.t_ferro_frame, "Gap Rinforzo", "testate_r_gap", 2)
         
-        # PLATFORM
         sec = CollapsibleSection(self.scroll_frame, "4. Platform")
         sec.pack(fill="x", pady=2)
         self.params_vars['platform_active'] = tk.BooleanVar(value=True)
         ttk.Checkbutton(sec.content_frame, text="Attiva Platform", variable=self.params_vars['platform_active'], command=self.refresh).pack(anchor="w")
         self.add_entry(sec.content_frame, "Altezza Fascia", "fascia_h", 35)
         self.add_entry(sec.content_frame, "Larg. Lembo Ext", "plat_flap_w", 40)
+        self.add_entry(sec.content_frame, "Gap Platform", "plat_gap", 3)
         
-        # LEMBI
         sec = CollapsibleSection(self.scroll_frame, "5. Lembi Interni")
         sec.pack(fill="x", pady=2)
         self.add_entry(sec.content_frame, "Lunghezza", "F", 120)
@@ -474,29 +499,34 @@ class PackagingApp(tk.Tk):
         if self.params_vars['testate_shape'].get() == 'ferro': self.t_ferro_frame.pack(fill="x", padx=10)
         else: self.t_ferro_frame.pack_forget()
 
-        self.canvas.delete("all")
-        params = {k: v.get() for k, v in self.params_vars.items()}
-        model = BoxModel(params)
-        polygons, cut_lines, crease_lines, dimensions = model.get_data()
-        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
-        if cw < 50: return
-        tot_w = params['L'] + params['h_testate']*2 + 250
-        tot_h = params['W'] + params['h_fianchi']*2 + params['F']*2 + 150
-        scale = min(cw/tot_w, ch/tot_h) * 0.85
-        ox_model = max(params['h_testate'], params['h_fianchi']) + 60 + params.get('fascia_h',0)
-        oy_model = max(params['h_testate'], params['h_fianchi']) + params['F'] + 20
-        dx = (cw/2) - (ox_model + params['L']/2)*scale
-        dy = (ch/2) - (oy_model + params['W']/2)*scale
-
-        for p in polygons:
-            pts = [c for x, y in p['coords'] for c in (x*scale+dx, y*scale+dy)]
-            self.canvas.create_polygon(pts, fill=p['color'], outline="", tags=p['id'])
-        for line in crease_lines:
-            pts = [c for pt in line for c in (pt[0]*scale+dx, pt[1]*scale+dy)]
-            self.canvas.create_line(pts, fill="#2E7D32", width=2, dash=(5, 3))
-        for line in cut_lines:
-            pts = [c for pt in line for c in (pt[0]*scale+dx, pt[1]*scale+dy)]
-            self.canvas.create_line(pts, fill="black", width=2)
+        try:
+            self.canvas.delete("all")
+            params = {k: v.get() for k, v in self.params_vars.items()}
+            model = BoxModel(params)
+            polygons, cut_lines, crease_lines = model.get_data()
+            cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+            if cw < 50: return
+            tot_w = params['L'] + params['h_testate']*2 + 250
+            tot_h = params['W'] + params['h_fianchi']*2 + params['F']*2 + 150
+            scale = min(cw/tot_w, ch/tot_h) * 0.85
+            ox_model = max(params['h_testate'], params['h_fianchi']) + 60 + params.get('fascia_h',0)
+            oy_model = max(params['h_testate'], params['h_fianchi']) + params['F'] + 20
+            dx = (cw/2) - (ox_model + params['L']/2)*scale
+            dy = (ch/2) - (oy_model + params['W']/2)*scale
+            
+            for p in polygons:
+                pts = [c for x, y in p['coords'] for c in (x*scale+dx, y*scale+dy)]
+                col = p.get('color', 'white')
+                self.canvas.create_polygon(pts, fill=col, outline="", tags=p.get('id', ''))
+            for line in crease_lines:
+                pts = [c for pt in line for c in (pt[0]*scale+dx, pt[1]*scale+dy)]
+                self.canvas.create_line(pts, fill="#2E7D32", width=2, dash=(5, 3))
+            for line in cut_lines:
+                pts = [c for pt in line for c in (pt[0]*scale+dx, pt[1]*scale+dy)]
+                self.canvas.create_line(pts, fill="black", width=2)
+        except Exception as e:
+            traceback.print_exc()
+            self.canvas.create_text(10, 10, anchor="nw", text=f"ERRORE: {e}", fill="red")
 
 if __name__ == "__main__":
     app = PackagingApp()
