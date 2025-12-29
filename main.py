@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-# --- UTILS UI ---
+# --- WIDGET PERSONALIZZATI ---
 class CollapsibleSection(ttk.Frame):
     def __init__(self, parent, title, expanded=False):
         super().__init__(parent)
@@ -19,14 +19,14 @@ class CollapsibleSection(ttk.Frame):
         else:
             self.content_frame.pack_forget()
 
-# --- MODEL GEOMETRICO ---
+# --- GEOMETRIA ---
 class BoxModel:
     def __init__(self, params):
         self.p = params
-        self.gap_base = 1.5 # Gap visivo base in mm
+        self.gap_base = 1.5 
 
     def _get_u_shape(self, L_base, H_full, orientation):
-        """Calcola coordinate per fianchi/testate a U"""
+        """Genera punti per profilo a U"""
         prefix = "fianchi" if orientation in ['top', 'bottom'] else "testate"
         h_low = self.p.get(f'{prefix}_h_low', H_full * 0.6)
         shoulder = self.p.get(f'{prefix}_shoulder', L_base * 0.2)
@@ -35,15 +35,13 @@ class BoxModel:
         if shoulder * 2 > L_base: shoulder = L_base / 2 - 1
         if shoulder < 0: shoulder = 0
 
-        # Coordinate base (Y negativo verso l'esterno)
+        # Coordinate base (Sistema locale TOP)
         pts = [
             (0, 0), (0, -H_full), 
             (shoulder, -H_full), (shoulder, -h_low), 
             (L_base - shoulder, -h_low), (L_base - shoulder, -H_full),
             (L_base, -H_full), (L_base, 0)
         ]
-        
-        # Linea spalla per highlight
         sh_line_raw = [(0, -H_full), (shoulder, -H_full)]
 
         final_coords = []
@@ -64,118 +62,56 @@ class BoxModel:
         return final_coords, final_sh_line
 
     def _get_flap_geo(self, corner, h_testata, f_len):
-        """
-        Calcola geometria del lembo.
-        Ritorna:
-        - coords: Lista di punti (x,y) GLOBAL
-        - crease: Lista di 2 punti [(x1,y1), (x2,y2)] che rappresenta l'attacco (piega)
-        - cut: Lista di segmenti di taglio
-        """
-        # Parametri
+        """Calcola geometria lembo"""
         T = self.p.get('thickness', 3.0)
-        gap = self.gap_base + T # Gap totale = visivo + spessore materiale
+        gap = self.gap_base + T 
         
-        # Parametri fianco (Target shape)
         is_ferro = (self.p.get('fianchi_shape') == 'ferro')
         shoulder = self.p.get('fianchi_shoulder', 0)
         h_fianco_full = self.p.get('h_fianchi', h_testata)
         h_fianco_low = self.p.get('fianchi_h_low', h_fianco_full)
         
-        # Geometria Locale (riferita all'angolo della scatola)
-        # Asse U (Orizzontale locale): Distanza dal bordo fiancata (gap -> H_testata)
-        # Asse V (Verticale locale): Lunghezza lembo (0 -> F)
-        
-        # Scasso U-Shape:
-        # Lo scasso avviene sul lato "esterno" del lembo (quello che corrisponde all'alto della scatola).
-        # Nel sistema locale, se U=0 è l'angolo interno (vicino al fianco) e U=H è l'esterno (alto scatola),
-        # allora lo scasso deve ridurre U da H a H_low quando V > shoulder.
-        
         cut_depth = h_fianco_full - h_fianco_low
         if cut_depth < 0: cut_depth = 0
         
-        u_inner = gap # Staccato dal fianco
-        u_outer = h_testata # Attaccato alla testata (ma potrebbe essere ridotto per tolleranza, qui teniamo H)
-        u_outer_low = h_testata - cut_depth # Parte ribassata
+        u_inner = gap 
+        u_outer = h_testata 
+        u_outer_low = h_testata - cut_depth
 
-        # Costruzione Punti Locali (senso antiorario partendo dall'attacco testata interno)
-        # Punti:
-        # 1. Attacco Interno (Vicino gap) -> Piega Start
-        # 2. Punta Interna
-        # 3. Punta Esterna (Ribassata se necessario)
-        # 4. Angolo Scasso
-        # 5. Spalla Scasso
-        # 6. Attacco Esterno -> Piega End
-        
         pts_local = []
         
         if is_ferro and f_len > shoulder:
-            # Con Scasso
             pts_local = [
-                (u_inner, 0),           # 1. Base (gap)
-                (u_inner, f_len),       # 2. Punta
-                (u_outer_low, f_len),   # 3. Punta Esterna Ribassata
-                (u_outer_low, shoulder),# 4. Angolo interno scasso
-                (u_outer, shoulder),    # 5. Spalla esterna
-                (u_outer, 0)            # 6. Base Esterna
+                (u_inner, 0), (u_inner, f_len), (u_outer_low, f_len),
+                (u_outer_low, shoulder), (u_outer, shoulder), (u_outer, 0)
             ]
         else:
-            # Rettangolare
-            pts_local = [
-                (u_inner, 0),
-                (u_inner, f_len),
-                (u_outer, f_len),
-                (u_outer, 0)
-            ]
+            pts_local = [(u_inner, 0), (u_inner, f_len), (u_outer, f_len), (u_outer, 0)]
 
-        # TRASFORMAZIONE GLOBALE
-        # corner indica dove siamo.
-        # L'attacco (linea u_inner->u_outer a v=0) è la linea di piega? 
-        # NO. La linea di piega è l'attacco alla TESTATA.
-        # La testata è a X negativo (TL).
-        # Il lembo è attaccato lungo la linea X in [-H, -gap] e Y=0?
-        # NO. La testata finisce a Y=0.
-        # Il lembo TL è attaccato al bordo SUPERIORE della testata SX.
-        # Testata SX è definita tra Y=0 e Y=W. Bordo superiore è Y=0.
-        # Quindi la linea di piega è su Y=0, per X che va da -H a 0 (meno gap).
-        # Nel sistema locale:
-        # u rappresenta la X (negativa). v rappresenta la Y (negativa).
-        # u va da gap a H. 
-        # Globale X = -u.
-        # Globale Y = -v.
-        
         final_pts = []
-        
-        # Mapping Local (u,v) -> Global (x,y) relative to corner (0,0 of box)
         for u, v in pts_local:
             gx, gy = 0, 0
-            if corner == 'tl': # Top-Left (Testata SX, Lato Alto)
-                gx = -u
-                gy = -v
-            elif corner == 'tr': # Top-Right (Testata DX, Lato Alto)
-                gx = self.p['L'] + u
-                gy = -v
-            elif corner == 'bl': # Bottom-Left (Testata SX, Lato Basso)
-                gx = -u
-                gy = self.p['W'] + v
-            elif corner == 'br': # Bottom-Right (Testata DX, Lato Basso)
-                gx = self.p['L'] + u
-                gy = self.p['W'] + v
-            
+            if corner == 'tl': gx, gy = -u, -v
+            elif corner == 'tr': gx, gy = self.p['L'] + u, -v
+            elif corner == 'bl': gx, gy = -u, self.p['W'] + v
+            elif corner == 'br': gx, gy = self.p['L'] + u, self.p['W'] + v
             final_pts.append((gx, gy))
 
-        # IDENTIFICAZIONE LINEE
-        # La Piega (Crease) è il segmento che collega l'ultimo punto al primo punto (chiusura sulla testata).
-        # Nel pts_local: (u_outer, 0) -> (u_inner, 0). Entrambi hanno v=0.
-        # Corrisponde a final_pts[-1] e final_pts[0].
+        # Nota: La linea di piega (chiusura su testata) non la aggiungiamo qui
+        # perché la gestiremo disegnando il bordo della testata come verde.
+        # Qui ritorniamo solo il perimetro di taglio del lembo.
         
-        crease_line = [final_pts[-1], final_pts[0]]
+        # Tutto il perimetro del lembo tranne l'ultimo segmento (che è quello aperto sulla testata)
+        # In pts_local partiamo da u_inner,0 e finiamo a u_outer,0.
+        # Quindi il taglio è tutto tranne il segmento che unisce Last->First (virtuale) o l'attacco?
+        # I punti sono una "U". Il taglio è la sequenza dei punti.
+        # La chiusura (Last Point -> First Point) è la linea di piega, ma è "aperta" geometricamente qui.
         
-        # Il Taglio (Cut) è tutto il resto del percorso
         cut_segments = []
         for i in range(len(final_pts)-1):
             cut_segments.append([final_pts[i], final_pts[i+1]])
             
-        return final_pts, crease_line, cut_segments
+        return final_pts, cut_segments
 
     def get_data(self):
         polygons = []
@@ -224,11 +160,14 @@ class BoxModel:
                            [(ox, oy+W), (ox, oy+W+H_f), (ox+L, oy+W+H_f), (ox+L, oy+W)]
             
             polygons.append({'id': 'poly_fianchi', 'coords': poly_pts, 'color': 'white'})
-            for i in range(len(poly_pts)-1): cut_lines.append([poly_pts[i], poly_pts[i+1]])
+            
+            # Tagli Fiancate: Tutto tranne la base (che è già disegnata come piega del fondo)
+            for i in range(len(poly_pts)-1):
+                cut_lines.append([poly_pts[i], poly_pts[i+1]])
 
         dimensions.append({'id': 'dim_h_fianchi', 'coords': [(ox, oy), (ox, oy-H_f)]})
 
-        # --- 3. TESTATE ---
+        # --- 3. TESTATE (CORRETTO PER PIEGE LEMBI) ---
         for orient in ['left', 'right']:
             if self.p.get('testate_shape') == 'ferro':
                 pts, sh_line = self._get_u_shape(W, H_t, orient)
@@ -247,25 +186,39 @@ class BoxModel:
                 else: poly_pts = [(ox+L, oy), (ox+L+H_t, oy), (ox+L+H_t, oy+W), (ox+L, oy+W)]
             
             polygons.append({'id': 'poly_testate', 'coords': poly_pts, 'color': 'white'})
-            for i in range(len(poly_pts)-1): cut_lines.append([poly_pts[i], poly_pts[i+1]])
+            
+            # GESTIONE LINEE TESTATA (Pieghe vs Tagli)
+            # poly_pts è una sequenza di punti.
+            # Seg 0: Lato Alto (Attacco Lembo) -> PIEGA
+            # Seg 1..N-1: Profilo Esterno -> TAGLIO
+            # Seg N: Lato Basso (Attacco Lembo) -> PIEGA
+            # Chiusura (Last->First): Base (Fondo) -> PIEGA (già fatta)
+            
+            # Lato Alto (Segmento 0) -> Piega Lembo 1
+            crease_lines.append([poly_pts[0], poly_pts[1]])
+            
+            # Profilo Esterno (Segmenti intermedi) -> Taglio
+            # Dal punto 1 al penultimo
+            for i in range(1, len(poly_pts)-2):
+                 cut_lines.append([poly_pts[i], poly_pts[i+1]])
+                 
+            # Lato Basso (Ultimo segmento della lista aperta) -> Piega Lembo 2
+            crease_lines.append([poly_pts[-2], poly_pts[-1]])
 
         dimensions.append({'id': 'dim_h_testate', 'coords': [(ox, oy), (ox-H_t, oy)]})
 
-        # --- 4. LEMBI (NUOVA LOGICA) ---
+        # --- 4. LEMBI ---
         corners = ['tl', 'tr', 'bl', 'br']
         for c in corners:
-            pts, crease, cuts = self._get_flap_geo(c, H_t, F)
+            pts, cuts = self._get_flap_geo(c, H_t, F)
             
-            # Offset globale
             pts_off = [(x+ox, y+oy) for x,y in pts]
-            crease_off = [(x+ox, y+oy) for x,y in crease]
             cuts_off = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in cuts]
             
             polygons.append({'id': 'poly_lembi', 'coords': pts_off, 'color': 'white'})
-            crease_lines.append(crease_off)
             cut_lines.extend(cuts_off)
 
-        # Dimensione F (Solo primo lembo)
+        # Dimensione F
         if len(polygons) > 0:
             l_pts = next((p['coords'] for p in polygons if p['id'] == 'poly_lembi'), None)
             if l_pts:
@@ -273,11 +226,11 @@ class BoxModel:
 
         return polygons, cut_lines, crease_lines, dimensions
 
-# --- APP CLASSIC SETUP ---
+# --- APP SETUP ---
 class PackagingApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Packaging CAD - Proiezione Tecnica")
+        self.title("Packaging CAD - Linee Corrette")
         self.geometry("1300x900")
         s = ttk.Style()
         s.configure("Toggle.TButton", font=("Segoe UI", 10, "bold"))
@@ -306,23 +259,23 @@ class PackagingApp(tk.Tk):
         self.after(200, self.refresh)
 
     def build_ui(self):
-        ttk.Label(self.scroll_frame, text="Parametri Tecnici", font=("Segoe UI", 16, "bold")).pack(pady=15)
-        
+        ttk.Label(self.scroll_frame, text="Parametri Fustella", font=("Segoe UI", 16, "bold")).pack(pady=15)
+
         sec_fondo = CollapsibleSection(self.scroll_frame, "1. Fondo & Materiale", expanded=True)
         sec_fondo.pack(fill="x", pady=2)
         self.add_entry(sec_fondo.content_frame, "Lunghezza (L)", "L", 400, "poly_fondo", "dim_L")
         self.add_entry(sec_fondo.content_frame, "Larghezza (W)", "W", 300, "poly_fondo", "dim_W")
-        self.add_entry(sec_fondo.content_frame, "Spessore Cartone", "thickness", 5.0, "poly_fondo", "") # Default 5mm per vedere bene il gap
+        self.add_entry(sec_fondo.content_frame, "Spessore Cartone", "thickness", 5.0, "poly_fondo", "")
 
         sec_fianchi = CollapsibleSection(self.scroll_frame, "2. Fiancate", expanded=True)
         sec_fianchi.pack(fill="x", pady=2)
         self.add_entry(sec_fianchi.content_frame, "Altezza Fianco", "h_fianchi", 100, "poly_fianchi", "dim_h_fianchi")
-        self.params_vars['fianchi_shape'] = tk.StringVar(value="ferro") # Default attivo per demo
+        self.params_vars['fianchi_shape'] = tk.StringVar(value="ferro")
         cb_f = ttk.Checkbutton(sec_fianchi.content_frame, text="Ferro di Cavallo", variable=self.params_vars['fianchi_shape'], 
                                onvalue="ferro", offvalue="rect", command=lambda: self.toggle_shape_opts('fianchi'))
         cb_f.pack(anchor="w", pady=5)
         self.f_ferro_frame = ttk.Frame(sec_fianchi.content_frame)
-        self.f_ferro_frame.pack(fill="x", padx=10) # Visibile default
+        self.f_ferro_frame.pack(fill="x", padx=10)
         self.add_entry(self.f_ferro_frame, "Altezza Minima", "fianchi_h_low", 60, "poly_fianchi", "dim_fianchi_h_low")
         self.add_entry(self.f_ferro_frame, "Spalla Laterale", "fianchi_shoulder", 80, "poly_fianchi", "dim_fianchi_shoulder")
 
@@ -340,7 +293,7 @@ class PackagingApp(tk.Tk):
         sec_lembi = CollapsibleSection(self.scroll_frame, "4. Incollaggio")
         sec_lembi.pack(fill="x", pady=2)
         self.add_entry(sec_lembi.content_frame, "Lembo Incollaggio", "F", 120, "poly_lembi", "dim_F")
-        ttk.Label(sec_lembi.content_frame, text="Verde = Piega (Snervatura)\nNero = Taglio\nGap automatico su spessore", font=("Arial", 9), foreground="#555").pack(pady=5)
+        ttk.Label(sec_lembi.content_frame, text="Attacco lembo è ora tratteggiato (Piega)", font=("Arial", 9), foreground="#2E7D32").pack(pady=5)
 
     def toggle_shape_opts(self, section):
         val = self.params_vars[f'{section}_shape'].get()
@@ -393,14 +346,14 @@ class PackagingApp(tk.Tk):
 
         for p in polygons:
             pts = [c for x, y in p['coords'] for c in (x*scale+dx, y*scale+dy)]
-            self.canvas.create_polygon(pts, fill=p['color'], outline="", tags=p['id']) # Solo riempimento
+            self.canvas.create_polygon(pts, fill=p['color'], outline="", tags=p['id'])
 
-        # Cordonature (Pieghe) - VERDE TRATTEGGIATO
+        # Cordonature (Pieghe)
         for line in crease_lines:
             pts = [c for pt in line for c in (pt[0]*scale+dx, pt[1]*scale+dy)]
             self.canvas.create_line(pts, fill="#2E7D32", width=2, dash=(5, 3))
 
-        # Tagli (Perimetro) - NERO SOLIDO
+        # Tagli
         for line in cut_lines:
             pts = [c for pt in line for c in (pt[0]*scale+dx, pt[1]*scale+dy)]
             self.canvas.create_line(pts, fill="black", width=2, capstyle=tk.ROUND)
