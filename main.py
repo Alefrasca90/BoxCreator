@@ -1,25 +1,35 @@
 import sys
+import math
 import traceback
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QScrollArea, QPushButton, QLabel, 
-                               QLineEdit, QFrame, QCheckBox, QSizePolicy)
-from PySide6.QtCore import Qt, QPointF
-from PySide6.QtGui import QPainter, QPen, QColor, QPolygonF, QFont
+                               QLineEdit, QFrame, QCheckBox, QSizePolicy, QTabWidget)
+from PySide6.QtCore import Qt, QPointF, QTimer
+from PySide6.QtGui import QPainter, QPen, QColor, QPolygonF, QFont, QBrush
 
-# --- CONFIGURAZIONE COLORI (LOOK & FEEL) ---
+# --- CONFIGURAZIONE COLORI ---
 THEME = {
     "bg_ui": "#2E2E2E",
     "bg_panel": "#3C3F41",
     "fg_text": "#F0F0F0",
-    "canvas_bg": "#F5F5F5",
-    "cardboard": "#E0C0A0",     # Colore unico per tutto il cartone
+    "canvas_bg": "#404040", 
+    
+    # 2D
+    "cardboard": "#E0C0A0",
+    
+    # 3D: Brown = Interno (Sopra), White = Esterno (Sotto)
+    "brown_opaque": QColor(190, 150, 110, 255),
+    "white_opaque": QColor(240, 240, 240, 255),
+    "brown_alpha":  QColor(190, 150, 110, 180),
+    "white_alpha":  QColor(240, 240, 240, 180),
+    
     "highlight": "#81D4FA",
     "line_cut": "#000000",
     "line_crease": "#00C853"
 }
 
 # ==========================================
-# 1. WIDGET UTILS (Interfaccia)
+# 1. WIDGET UTILS
 # ==========================================
 class CollapsibleSection(QWidget):
     def __init__(self, title, parent=None, expanded=False):
@@ -34,9 +44,10 @@ class CollapsibleSection(QWidget):
                 background-color: {THEME['bg_panel']};
                 color: {THEME['fg_text']};
                 text-align: left;
-                padding: 5px;
+                padding: 8px;
                 border: none;
                 font-weight: bold;
+                border-bottom: 1px solid #555;
             }}
             QPushButton:hover {{ background-color: {THEME['bg_ui']}; }}
         """)
@@ -45,7 +56,7 @@ class CollapsibleSection(QWidget):
 
         self.content_area = QWidget()
         self.content_layout = QVBoxLayout(self.content_area)
-        self.content_layout.setContentsMargins(5, 5, 5, 5)
+        self.content_layout.setContentsMargins(5, 5, 5, 10)
         self.layout.addWidget(self.content_area)
 
         self.expanded = expanded
@@ -61,12 +72,12 @@ class CollapsibleSection(QWidget):
         self.content_layout.addWidget(widget)
 
 # ==========================================
-# 2. MOTORE GEOMETRICO
+# 2. MOTORE GEOMETRICO 2D
 # ==========================================
 class BoxModel:
     def __init__(self, params):
         self.p = params
-        self.base_gap = 2.0 
+        self.base_gap = 2.0
 
     def _rotate_points(self, pts, orientation):
         L = self.p['L']; W = self.p['W']
@@ -155,31 +166,21 @@ class BoxModel:
         if h_low > H_full: h_low = H_full
         shoulder = self.p.get('testate_shoulder', W * 0.2)
         if shoulder * 2 > W: shoulder = W / 2 - 1
-        
         has_reinf = is_ferro and self.p.get('testate_r_active', False)
         r_h = self.p.get('testate_r_h', 30)
         r_gap = self.p.get('testate_r_gap', 2)
         if r_h > h_low: r_h = h_low - 1
         avail_w = W - 2*shoulder
         if r_gap * 2 >= avail_w: r_gap = (avail_w / 2) - 5
-
         curr = (0, 0); pts_poly = [curr]
         cuts, creases = [], []
-        
         target = (0, -H_full); creases.append([curr, target]); curr = target; pts_poly.append(curr)
-        
         if is_ferro:
             p_sh_sx = (shoulder, -H_full); p_u_sx = (shoulder, -h_low)
             p_u_dx = (W - shoulder, -h_low); p_sh_dx = (W - shoulder, -H_full)
-            
-            if not has_platform:
-                cuts.append([curr, p_sh_sx])
-            # Se platform attiva, questo segmento è gestito da create_unit
-            
+            if not has_platform: cuts.append([curr, p_sh_sx])
             curr = p_sh_sx; pts_poly.append(curr)
-            
             cuts.append([curr, p_u_sx]); curr = p_u_sx; pts_poly.append(curr)
-            
             if has_reinf:
                 p_r_tl = (shoulder + r_gap, -h_low); p_r_bl = (shoulder + r_gap, -(h_low + r_h))
                 p_r_br = (W - shoulder - r_gap, -(h_low + r_h)); p_r_tr = (W - shoulder - r_gap, -h_low)
@@ -188,26 +189,18 @@ class BoxModel:
                 curr = p_u_dx; pts_poly.extend([p_r_tl, p_r_bl, p_r_br, p_r_tr, p_u_dx])
             else:
                 cuts.append([curr, p_u_dx]); curr = p_u_dx; pts_poly.append(curr)
-            
             cuts.append([curr, p_sh_dx]); curr = p_sh_dx; pts_poly.append(curr)
-            
             target = (W, -H_full)
-            if not has_platform:
-                cuts.append([curr, target])
-            
+            if not has_platform: cuts.append([curr, target])
             curr = target; pts_poly.append(curr)
         else:
             target = (W, -H_full)
-            if not has_platform:
-                cuts.append([curr, target])
+            if not has_platform: cuts.append([curr, target])
             curr = target; pts_poly.append(curr)
-            
         creases.append([curr, (W, 0)]); curr = (W, 0); pts_poly.append(curr)
-        
         g_poly = self._rotate_points(pts_poly, orientation)
         g_cuts = [self._rotate_points(seg, orientation) for seg in cuts]
         g_creases = [self._rotate_points(seg, orientation) for seg in creases]
-        
         if has_platform:
             plat_polys, plat_creases, plat_cuts = self._get_platform_assembly(orientation, H_full)
             return [{'coords': g_poly, 'type': 'testate'}] + plat_polys, g_cuts + plat_cuts, g_creases + plat_creases
@@ -221,48 +214,32 @@ class BoxModel:
         is_ferro = (self.p.get('testate_shape') == 'ferro')
         shoulder = self.p.get('testate_shoulder', W * 0.2)
         if shoulder * 2 > W: shoulder = W / 2 - 1
-
         parts = [] 
-        
         def create_unit(u_s, u_e, left, right):
             v_b, v_t = -H_t, -(H_t + Fascia_H)
             f_poly = [(u_s, v_b), (u_s, v_t), (u_e, v_t), (u_e, v_b)]
-            
             f_cr = [[(u_s, v_b), (u_e, v_b)]] 
             f_ct = [[(u_s, v_t), (u_e, v_t)]]
-            
             if left:
                 f_cr.append([(u_s, v_b), (u_s, v_t)])
                 l_poly = [(u_s-Plat_W, v_b), (u_s-Plat_W, v_t), (u_s, v_t), (u_s, v_b)]
-                l_ct = [
-                    [(u_s-Plat_W, v_b), (u_s-Plat_W, v_t)], 
-                    [(u_s-Plat_W, v_t), (u_s, v_t)],        
-                    [(u_s, v_b), (u_s-Plat_W, v_b)]         
-                ]
+                l_ct = [[(u_s-Plat_W, v_b), (u_s-Plat_W, v_t)], [(u_s-Plat_W, v_t), (u_s, v_t)], [(u_s, v_b), (u_s-Plat_W, v_b)]]
                 parts.append((l_poly, [], l_ct, 'platform_flap'))
             else:
                 f_ct.append([(u_s, v_b), (u_s, v_t)])
-                
             if right:
                 f_cr.append([(u_e, v_b), (u_e, v_t)])
                 r_poly = [(u_e, v_b), (u_e, v_t), (u_e+Plat_W, v_t), (u_e+Plat_W, v_b)]
-                r_ct = [
-                    [(u_e, v_t), (u_e+Plat_W, v_t)],        
-                    [(u_e+Plat_W, v_t), (u_e+Plat_W, v_b)], 
-                    [(u_e+Plat_W, v_b), (u_e, v_b)]         
-                ]
+                r_ct = [[(u_e, v_t), (u_e+Plat_W, v_t)], [(u_e+Plat_W, v_t), (u_e+Plat_W, v_b)], [(u_e+Plat_W, v_b), (u_e, v_b)]]
                 parts.append((r_poly, [], r_ct, 'platform_flap'))
             else:
                 f_ct.append([(u_e, v_b), (u_e, v_t)])
-            
             parts.append((f_poly, f_cr, f_ct, 'platform'))
-
         if is_ferro:
             create_unit(0, shoulder, True, False)
             create_unit(W-shoulder, W, False, True)
         else:
             create_unit(0, W, True, True)
-
         g_polys, g_cr, g_ct = [], [], []
         for poly, cr, ct, typ in parts:
             g_polys.append({'coords': self._rotate_points(poly, corner), 'type': typ})
@@ -278,7 +255,6 @@ class BoxModel:
         h_fianco_full = self.p.get('h_fianchi', h_testata)
         h_fianco_low = self.p.get('fianchi_h_low', h_fianco_full)
         has_platform = self.p.get('platform_active', False)
-        
         cut_depth = h_fianco_full - h_fianco_low
         if cut_depth < 0: cut_depth = 0
         u_inner = gap
@@ -286,24 +262,16 @@ class BoxModel:
         u_outer = h_testata - gap_outer
         u_outer_low = u_outer - cut_depth
         if u_outer < u_inner: u_outer = u_inner + 1
-        
         pts_local = []
         if is_ferro and f_len > shoulder:
             pts_local = [(u_inner, 0), (u_inner, f_len), (u_outer_low, f_len),
                          (u_outer_low, shoulder), (u_outer, shoulder), (u_outer, 0)]
         else:
             pts_local = [(u_inner, 0), (u_inner, f_len), (u_outer, f_len), (u_outer, 0)]
-
         final_pts = self._rotate_points(pts_local, corner)
         cuts = []
         for i in range(len(final_pts)-1): cuts.append([final_pts[i], final_pts[i+1]])
-        
-        # FIX PRINCIPALE:
-        # Non restituiamo la "crease" (linea di piega) qui perché coincide con il bordo 
-        # della Testata che ha già la sua linea. Questo evita la sovrapposizione.
-        # crease = [final_pts[0], final_pts[-1]] 
-        
-        return final_pts, cuts, [] # Restituisci lista vuota per la piega
+        return final_pts, cuts, []
 
     def get_data(self):
         polygons, cut_lines, crease_lines = [], [], []
@@ -311,25 +279,18 @@ class BoxModel:
         H_f = self.p['h_fianchi']; H_t = self.p['h_testate']; F = self.p['F']
         Fascia_H = self.p.get('fascia_h', 0) if self.p.get('platform_active') else 0
         Plat_W = self.p.get('plat_flap_w', 0) if self.p.get('platform_active') else 0
-        
         ox = max(H_t + Fascia_H, H_f) + Plat_W + 50
         oy = max(H_t + Fascia_H, H_f) + F + 30 
-
-        # FONDO
         base_pts = [(0, 0), (L, 0), (L, W), (0, W)]
         base_off = [(x+ox, y+oy) for x,y in base_pts]
         polygons.append({'id': 'poly_fondo', 'type': 'fondo', 'coords': base_off})
         for i in range(4): crease_lines.append([base_off[i], base_off[(i+1)%4]])
-
-        # FIANCATE
         for orient in ['top', 'bottom']:
             g_poly, g_cuts, g_creases = self._get_fianco_geometry(L, H_f, orient)
             poly_off = [(x+ox, y+oy) for x,y in g_poly]
             polygons.append({'id': 'poly_fianchi', 'type': 'fianchi', 'coords': poly_off})
             for c in g_cuts: cut_lines.append([(p[0]+ox, p[1]+oy) for p in c])
             for c in g_creases: crease_lines.append([(p[0]+ox, p[1]+oy) for p in c])
-
-        # TESTATE
         for orient in ['left', 'right']:
             poly_items, g_cuts, g_creases = self._get_testata_geometry(W, H_t, orient)
             for item in poly_items:
@@ -338,31 +299,267 @@ class BoxModel:
                 polygons.append({'id': f'poly_{t_type}', 'type': t_type, 'coords': coords_off})
             for c in g_cuts: cut_lines.append([(p[0]+ox, p[1]+oy) for p in c])
             for c in g_creases: crease_lines.append([(p[0]+ox, p[1]+oy) for p in c])
-
-        # LEMBI
         for c in ['tl', 'tr', 'bl', 'br']:
             g_pts, g_cuts, g_crease = self._get_flap_geo(c, H_t, F)
             pts_off = [(x+ox, y+oy) for x,y in g_pts]
             cuts_off = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in g_cuts]
-            
-            # Gestione sicura nel caso g_crease sia vuoto
-            if g_crease:
-                crease_off = [(p[0]+ox, p[1]+oy) for p in g_crease]
-                crease_lines.append(crease_off)
-            
+            if g_crease: crease_lines.append([(p[0]+ox, p[1]+oy) for p in g_crease])
             polygons.append({'id': 'poly_lembi', 'type': 'lembi', 'coords': pts_off})
             cut_lines.extend(cuts_off)
-
         return polygons, cut_lines, crease_lines
 
 # ==========================================
-# 3. APP PRINCIPALE (UI Ported to Qt)
+# 3. MOTORE 3D (RIGOROSO - FOLD UP POSITIVE Z - SORTED)
 # ==========================================
-class DrawingArea(QWidget):
+class Part3D:
+    def __init__(self, name, vertices, parent=None, pivot=(0,0,0), axis='x', fold_sign=1):
+        self.name = name
+        self.local_vertices = vertices 
+        self.parent = parent
+        self.pivot = pivot 
+        self.axis = axis 
+        self.fold_sign = fold_sign 
+        self.angle = 0.0
+        self.children = []
+        if parent: parent.children.append(self)
+
+    def compute_world_transform(self, parent_tr=None):
+        rad = math.radians(self.angle)
+        c, s = math.cos(rad), math.sin(rad)
+        
+        def transform(v):
+            x, y, z = v
+            # Rotazione Locale
+            if self.axis == 'x': rx, ry, rz = (x, y*c - z*s, y*s + z*c)
+            elif self.axis == 'y': rx, ry, rz = (x*c + z*s, y, -x*s + z*c)
+            else: rx, ry, rz = (x*c - y*s, x*s + y*c, z)
+            
+            # Traslazione al Pivot
+            px, py, pz = (rx + self.pivot[0], ry + self.pivot[1], rz + self.pivot[2])
+            
+            if parent_tr:
+                return parent_tr((px, py, pz))
+            else:
+                return (px, py, pz)
+        
+        return transform
+
+class Scene3D:
+    def __init__(self):
+        self.parts = []
+    
+    def build_box(self, p):
+        self.parts = []
+        L, W = p['L'], p['W']
+        H_f, H_t = p['h_fianchi'], p['h_testate']
+        F = p['F']
+        
+        # 1. FONDO (Z=0).
+        v_fondo = [(-L/2, -W/2, 0), (-L/2, W/2, 0), (L/2, W/2, 0), (L/2, -W/2, 0)]
+        fondo = Part3D("Fondo", v_fondo, None, (0,0,0), 'x', 0)
+        self.parts.append(fondo)
+        
+        # 2. FIANCATE
+        v_f_top = [(-L/2, -H_f, 0), (-L/2, 0, 0), (L/2, 0, 0), (L/2, -H_f, 0)]
+        fianco_top = Part3D("Fianco_Top", v_f_top, fondo, (0, -W/2, 0), 'x', -1) 
+        self.parts.append(fianco_top)
+        
+        v_f_btm = [(-L/2, 0, 0), (-L/2, H_f, 0), (L/2, H_f, 0), (L/2, 0, 0)]
+        fianco_btm = Part3D("Fianco_Btm", v_f_btm, fondo, (0, W/2, 0), 'x', 1) 
+        self.parts.append(fianco_btm)
+        
+        # 3. TESTATE
+        v_t_left = [(-H_t, -W/2, 0), (-H_t, W/2, 0), (0, W/2, 0), (0, -W/2, 0)]
+        testata_sx = Part3D("Testata_L", v_t_left, fondo, (-L/2, 0, 0), 'y', 1) 
+        self.parts.append(testata_sx)
+        
+        v_t_right = [(0, -W/2, 0), (0, W/2, 0), (H_t, W/2, 0), (H_t, -W/2, 0)]
+        testata_dx = Part3D("Testata_R", v_t_right, fondo, (L/2, 0, 0), 'y', -1) 
+        self.parts.append(testata_dx)
+        
+        # 4. LEMBI (Figli Testate)
+        v_l_tl = [(-H_t, -F, 0), (-H_t, 0, 0), (0, 0, 0), (0, -F, 0)]
+        lembo_tl = Part3D("Lembo_TL", v_l_tl, testata_sx, (0, -W/2, 0), 'x', 1)
+        self.parts.append(lembo_tl)
+        
+        v_l_bl = [(-H_t, 0, 0), (-H_t, F, 0), (0, F, 0), (0, 0, 0)]
+        lembo_bl = Part3D("Lembo_BL", v_l_bl, testata_sx, (0, W/2, 0), 'x', -1)
+        self.parts.append(lembo_bl)
+        
+        v_l_tr = [(0, -F, 0), (0, 0, 0), (H_t, 0, 0), (H_t, -F, 0)]
+        lembo_tr = Part3D("Lembo_TR", v_l_tr, testata_dx, (0, -W/2, 0), 'x', 1)
+        self.parts.append(lembo_tr)
+
+        v_l_br = [(0, 0, 0), (0, F, 0), (H_t, F, 0), (H_t, 0, 0)]
+        lembo_br = Part3D("Lembo_BR", v_l_br, testata_dx, (0, W/2, 0), 'x', -1)
+        self.parts.append(lembo_br)
+        
+        # 5. PLATFORM (Figli Testate)
+        if p.get('platform_active'):
+            fh = p.get('fascia_h', 30)
+            pl_w = p.get('plat_flap_w', 30)
+            
+            v_fascia_l = [(-fh, -W/2, 0), (-fh, W/2, 0), (0, W/2, 0), (0, -W/2, 0)]
+            fascia_l = Part3D("Fascia_L", v_fascia_l, testata_sx, (-H_t, 0, 0), 'y', -1)
+            self.parts.append(fascia_l)
+            
+            v_pfl_top = [(-fh, -pl_w, 0), (-fh, 0, 0), (0, 0, 0), (0, -pl_w, 0)]
+            pfl_top = Part3D("PFlap_L_Top", v_pfl_top, fascia_l, (0, -W/2, 0), 'x', 1)
+            self.parts.append(pfl_top)
+            
+            v_pfl_btm = [(-fh, 0, 0), (-fh, pl_w, 0), (0, pl_w, 0), (0, 0, 0)]
+            pfl_btm = Part3D("PFlap_L_Btm", v_pfl_btm, fascia_l, (0, W/2, 0), 'x', -1)
+            self.parts.append(pfl_btm)
+            
+            v_fascia_r = [(0, -W/2, 0), (0, W/2, 0), (fh, W/2, 0), (fh, -W/2, 0)]
+            fascia_r = Part3D("Fascia_R", v_fascia_r, testata_dx, (H_t, 0, 0), 'y', 1)
+            self.parts.append(fascia_r)
+            
+            v_pfr_top = [(0, -pl_w, 0), (0, 0, 0), (fh, 0, 0), (fh, -pl_w, 0)]
+            pfr_top = Part3D("PFlap_R_Top", v_pfr_top, fascia_r, (0, -W/2, 0), 'x', 1)
+            self.parts.append(pfr_top)
+            
+            v_pfr_btm = [(0, 0, 0), (0, pl_w, 0), (fh, pl_w, 0), (fh, 0, 0)]
+            pfr_btm = Part3D("PFlap_R_Btm", v_pfr_btm, fascia_r, (0, W/2, 0), 'x', -1)
+            self.parts.append(pfr_btm)
+
+    def get_polygons_to_draw(self):
+        transforms = {} 
+        def get_tr(part):
+            if part in transforms: return transforms[part]
+            parent_tr = get_tr(part.parent) if part.parent else None
+            tr = part.compute_world_transform(parent_tr)
+            transforms[part] = tr
+            return tr
+        polys = []
+        for p in self.parts:
+            tr = get_tr(p)
+            w_verts = [tr(v) for v in p.local_vertices]
+            
+            z_list = [v[2] for v in w_verts]
+            z_sort_key = min(z_list) if z_list else 0
+            if p.name == "Fondo": z_sort_key = -99999
+            
+            polys.append((z_sort_key, w_verts, p.name))
+        
+        # FIX: Ordine Inverso (Painter's Algorithm Corretto: Disegna dal LONTANO al VICINO)
+        polys.sort(key=lambda x: x[0], reverse=True) 
+        return polys
+
+class Viewer3D(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.scene = Scene3D()
+        self.cam_pitch = 30
+        self.cam_yaw = 45
+        self.scale = 1.0
+        self.drag_start = None
+        self.bg_color = QColor(THEME["bg_ui"])
+        self.transparency_mode = False
+
+    def set_params(self, p):
+        self.scene.build_box(p)
+        self.update()
+        
+    def set_transparency(self, enabled):
+        self.transparency_mode = enabled
+        self.update()
+
+    def update_angles(self, angles):
+        for p in self.scene.parts:
+            if "Fianco" in p.name:
+                p.angle = angles.get('fianchi', 0) * p.fold_sign
+            elif "Testata" in p.name:
+                p.angle = angles.get('testate', 0) * p.fold_sign
+            elif "Lembo" in p.name:
+                p.angle = angles.get('lembi', 0) * p.fold_sign
+            elif "Fascia" in p.name:
+                p.angle = angles.get('fasce', 0) * p.fold_sign
+            elif "PFlap" in p.name:
+                p.angle = angles.get('ext', 0) * p.fold_sign
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), self.bg_color)
+        
+        w, h = self.width(), self.height()
+        
+        rad_p = math.radians(self.cam_pitch)
+        rad_y = math.radians(self.cam_yaw)
+        cp, sp = math.cos(rad_p), math.sin(rad_p)
+        cy, sy = math.cos(rad_y), math.sin(rad_y)
+        
+        def project(v):
+            x, y, z = v
+            rx = x*cy - y*sy
+            ry = x*sy + y*cy
+            rz = z
+            y2 = ry*cp - rz*sp
+            z2 = ry*sp + rz*cp
+            
+            factor = 1000 / (1000 + z2) if (1000+z2) != 0 else 1
+            sx = rx * factor * self.scale + w/2
+            screen_y = -y2 * factor * self.scale + h/2 
+            return QPointF(sx, screen_y)
+
+        polys = self.scene.get_polygons_to_draw()
+        
+        for z, verts, name in polys:
+            pts = [project(v) for v in verts]
+            
+            # Calcolo Area (Shoelace)
+            area = 0.0
+            for i in range(len(pts)):
+                p1 = pts[i]
+                p2 = pts[(i+1) % len(pts)]
+                area += (p2.x() - p1.x()) * (p2.y() + p1.y())
+            
+            # FIX: In Qt Y è invertita, quindi area < 0 significa CCW (Faccia Frontale)
+            is_front = area < 0
+            
+            if is_front:
+                base_c = THEME["brown_alpha"] if self.transparency_mode else THEME["brown_opaque"]
+            else:
+                base_c = THEME["white_alpha"] if self.transparency_mode else THEME["white_opaque"]
+            
+            shade = max(0, min(40, int(z * 0.15 + 15)))
+            r, g, b, a = base_c.red(), base_c.green(), base_c.blue(), base_c.alpha()
+            final_c = QColor(max(0, r - shade), max(0, g - shade), max(0, b - shade), a)
+            
+            painter.setBrush(final_c)
+            painter.setPen(QPen(Qt.black, 2.0))
+            painter.drawPolygon(QPolygonF(pts))
+
+    def mousePressEvent(self, e):
+        self.drag_start = e.position().toPoint()
+
+    def mouseMoveEvent(self, e):
+        if self.drag_start:
+            curr = e.position().toPoint()
+            delta = curr - self.drag_start
+            self.cam_yaw -= delta.x() * 0.5
+            self.cam_pitch -= delta.y() * 0.5
+            self.drag_start = curr
+            self.update()
+            
+    def mouseReleaseEvent(self, e):
+        self.drag_start = None
+        
+    def wheelEvent(self, e):
+        if e.angleDelta().y() > 0: self.scale *= 1.1
+        else: self.scale *= 0.9
+        self.update()
+
+# ==========================================
+# 4. APP PRINCIPALE
+# ==========================================
+class DrawingArea2D(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.model_data = ([], [], [])  # Polys, Cuts, Creases
+        self.model_data = ([], [], []) 
         self.params_L = 100
         self.params_W = 100
         self.params_HF = 10
@@ -377,13 +574,11 @@ class DrawingArea(QWidget):
         self.params_HF = h_f
         self.params_HT = h_t
         self.params_F = F
-        self.update() # Trigger paintEvent
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        
-        # Sfondo
         painter.fillRect(self.rect(), self.bg_color)
         
         cw, ch = self.width(), self.height()
@@ -391,56 +586,40 @@ class DrawingArea(QWidget):
 
         polygons, cut_lines, crease_lines = self.model_data
         
-        # Logica di Scaling
         tot_w = self.params_L + self.params_HT*2 + 300
         tot_h = self.params_W + self.params_HF*2 + self.params_F*2 + 200
-        
         if tot_w == 0: tot_w = 1
         if tot_h == 0: tot_h = 1
 
         scale = min(cw/tot_w, ch/tot_h) * 0.8
-        
         ox_model = max(self.params_HT, self.params_HF) + 100
         oy_model = max(self.params_HT, self.params_HF) + self.params_F + 50
-        
         dx = (cw/2) - (ox_model + self.params_L/2)*scale
         dy = (ch/2) - (oy_model + self.params_W/2)*scale
 
-        # --- 1. Draw Polygons ---
         for p in polygons:
             pts = [QPointF(x*scale+dx, y*scale+dy) for x, y in p['coords']]
             qpoly = QPolygonF(pts)
-            
-            base_col = QColor(THEME["cardboard"])
-            
-            painter.setBrush(base_col)
+            painter.setBrush(QColor(THEME["cardboard"]))
             painter.setPen(Qt.NoPen)
             painter.drawPolygon(qpoly)
 
-        # --- 2. Draw Creases ---
         crease_pen = QPen(QColor(THEME["line_crease"]))
         crease_pen.setWidthF(1.5)
-        # Tratteggio fitto per linee corte
         crease_pen.setStyle(Qt.CustomDashLine) 
         crease_pen.setDashPattern([2, 3]) 
-        
         painter.setPen(crease_pen)
-        
         for line in crease_lines:
             pts = [QPointF(pt[0]*scale+dx, pt[1]*scale+dy) for pt in line]
-            if len(pts) >= 2:
-                painter.drawPolyline(pts)
+            if len(pts) >= 2: painter.drawPolyline(pts)
 
-        # --- 3. Draw Cuts ---
         cut_pen = QPen(QColor(THEME["line_cut"]))
         cut_pen.setWidthF(2.0)
         cut_pen.setCapStyle(Qt.RoundCap)
         painter.setPen(cut_pen)
-        
         for line in cut_lines:
              pts = [QPointF(pt[0]*scale+dx, pt[1]*scale+dy) for pt in line]
-             if len(pts) >= 2:
-                painter.drawPolyline(pts)
+             if len(pts) >= 2: painter.drawPolyline(pts)
 
 class PackagingApp(QMainWindow):
     def __init__(self):
@@ -449,54 +628,76 @@ class PackagingApp(QMainWindow):
         self.resize(1400, 950)
         self.setStyleSheet(f"QMainWindow {{ background-color: {THEME['bg_ui']}; }}")
 
-        # Main Widget & Layout
+        # Main Layout
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
         main_layout.setContentsMargins(0,0,0,0)
         main_layout.setSpacing(0)
 
-        # 1. Left Panel (Scrollable)
+        # 1. Left Panel
         scroll = QScrollArea()
         scroll.setFixedWidth(400)
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {THEME['bg_ui']}; }}")
-        
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet(f"QWidget {{ background-color: {THEME['bg_ui']}; color: {THEME['fg_text']}; }}")
         self.panel_layout = QVBoxLayout(self.scroll_content)
         self.panel_layout.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.scroll_content)
-        
         main_layout.addWidget(scroll)
 
-        # 2. Right Canvas
-        self.canvas = DrawingArea()
-        main_layout.addWidget(self.canvas)
+        # 2. Right Tabs (2D / 3D)
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border: 0; }}
+            QTabBar::tab {{ background: {THEME['bg_panel']}; color: white; padding: 10px; }}
+            QTabBar::tab:selected {{ background: {THEME['highlight']}; color: black; }}
+        """)
+        
+        self.canvas_2d = DrawingArea2D()
+        self.viewer_3d = Viewer3D()
+        
+        self.tabs.addTab(self.canvas_2d, "Progetto 2D")
+        self.tabs.addTab(self.viewer_3d, "Animazione 3D")
+        
+        main_layout.addWidget(self.tabs)
+        
+        self.chk_transparency = QCheckBox("Trasparenza 3D")
+        self.chk_transparency.setStyleSheet(f"color: {THEME['fg_text']}; font-weight: bold; margin-bottom: 10px;")
+        self.chk_transparency.toggled.connect(self.viewer_3d.set_transparency)
+        self.panel_layout.insertWidget(1, self.chk_transparency)
 
         self.inputs = {}
-        
         self.build_ui()
+        
+        # Animazione
+        self.step_idx = 0
+        self.anim_progress = 0.0
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_frame)
+        self.anim_angles = {'lembi':0, 'testate':0, 'fianchi':0, 'fasce':0, 'ext':0}
+        self.target_key = ''
+        self.is_animating = False
+        
         self.refresh()
 
     def build_ui(self):
         header = QLabel("PARAMETRI PROGETTO")
         header.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {THEME['highlight']}; padding: 20px;")
         header.setAlignment(Qt.AlignCenter)
-        self.panel_layout.addWidget(header)
+        self.panel_layout.insertWidget(0, header) 
 
-        # FONDO
-        sec = CollapsibleSection("1. Fondo", self.scroll_content, expanded=True)
+        # TUTTI I PANNELLI CHIUSI
+        sec = CollapsibleSection("1. Fondo", self.scroll_content, expanded=False)
         self.panel_layout.addWidget(sec)
         self.add_entry(sec, "Lunghezza (L)", "L", "400")
         self.add_entry(sec, "Larghezza (W)", "W", "300")
         self.add_entry(sec, "Spessore", "thickness", "5.0")
 
-        # FIANCATE
-        sec = CollapsibleSection("2. Fiancate", self.scroll_content, expanded=True)
+        sec = CollapsibleSection("2. Fiancate", self.scroll_content, expanded=False)
         self.panel_layout.addWidget(sec)
         self.add_entry(sec, "Altezza", "h_fianchi", "100")
-        
         self.cb_fianchi_shape = QCheckBox("Ferro di Cavallo")
         self.cb_fianchi_shape.setChecked(True)
         self.cb_fianchi_shape.toggled.connect(self.on_structure_change)
@@ -506,77 +707,68 @@ class PackagingApp(QMainWindow):
         f_ferro_layout = QVBoxLayout(self.f_ferro_container)
         f_ferro_layout.setContentsMargins(10,0,0,0)
         sec.add_widget(self.f_ferro_container)
-        
         self.add_entry_to_layout(f_ferro_layout, "Altezza Min", "fianchi_h_low", "60")
         self.add_entry_to_layout(f_ferro_layout, "Spalla", "fianchi_shoulder", "80")
-        
         self.cb_fianchi_r = QCheckBox("Raddoppio (Rinforzo)")
         self.cb_fianchi_r.setChecked(True)
         self.cb_fianchi_r.toggled.connect(self.refresh)
         f_ferro_layout.addWidget(self.cb_fianchi_r)
-        
         self.add_entry_to_layout(f_ferro_layout, "Alt. Rinforzo", "fianchi_r_h", "40")
         self.add_entry_to_layout(f_ferro_layout, "Gap Lat. Rinf.", "fianchi_r_gap", "2")
 
-        # TESTATE
-        sec = CollapsibleSection("3. Testate", self.scroll_content, expanded=True)
+        sec = CollapsibleSection("3. Testate", self.scroll_content, expanded=False)
         self.panel_layout.addWidget(sec)
         self.add_entry(sec, "Altezza", "h_testate", "100")
-        
         self.cb_testate_shape = QCheckBox("Ferro di Cavallo")
         self.cb_testate_shape.setChecked(True)
         self.cb_testate_shape.toggled.connect(self.on_structure_change)
         sec.add_widget(self.cb_testate_shape)
-        
         self.t_ferro_container = QWidget()
         t_ferro_layout = QVBoxLayout(self.t_ferro_container)
         t_ferro_layout.setContentsMargins(10,0,0,0)
         sec.add_widget(self.t_ferro_container)
-
         self.add_entry_to_layout(t_ferro_layout, "Altezza Min", "testate_h_low", "60")
         self.add_entry_to_layout(t_ferro_layout, "Spalla", "testate_shoulder", "50")
-        
         self.cb_testate_r = QCheckBox("Raddoppio (Rinforzo)")
         self.cb_testate_r.setChecked(True)
         self.cb_testate_r.toggled.connect(self.refresh)
         t_ferro_layout.addWidget(self.cb_testate_r)
-        
         self.add_entry_to_layout(t_ferro_layout, "Alt. Rinforzo", "testate_r_h", "30")
         self.add_entry_to_layout(t_ferro_layout, "Gap Rinforzo", "testate_r_gap", "2")
 
-        # PLATFORM
-        sec = CollapsibleSection("4. Platform", self.scroll_content)
+        sec = CollapsibleSection("4. Platform", self.scroll_content, expanded=False)
         self.panel_layout.addWidget(sec)
-        
         self.cb_plat_active = QCheckBox("Attiva Platform")
         self.cb_plat_active.setChecked(True)
         self.cb_plat_active.toggled.connect(self.refresh)
         sec.add_widget(self.cb_plat_active)
-        
         self.add_entry(sec, "Altezza Fascia", "fascia_h", "35")
         self.add_entry(sec, "Larg. Lembo Ext", "plat_flap_w", "40")
         self.add_entry(sec, "Gap Platform", "plat_gap", "3")
 
-        # LEMBI
-        sec = CollapsibleSection("5. Lembi Interni", self.scroll_content)
+        sec = CollapsibleSection("5. Lembi Interni", self.scroll_content, expanded=False)
         self.panel_layout.addWidget(sec)
         self.add_entry(sec, "Lunghezza", "F", "120")
-
+        
+        # PLAY BUTTON
+        self.btn_play = QPushButton("▶ ESEGUI PROSSIMA PIEGA (1/5)")
+        self.btn_play.setStyleSheet(f"background-color: {THEME['line_crease']}; color: white; padding: 15px; font-weight: bold; border-radius: 5px;")
+        self.btn_play.clicked.connect(self.next_animation_step)
+        self.panel_layout.addSpacing(20)
+        self.panel_layout.addWidget(self.btn_play)
+        
         self.panel_layout.addStretch()
 
     def add_entry(self, section, label_text, key, default_val):
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 2, 0, 2)
-        
         lbl = QLabel(label_text)
         lbl.setStyleSheet(f"color: {THEME['fg_text']};")
         lbl.setFixedWidth(120)
-        
         inp = QLineEdit(default_val)
         inp.setStyleSheet(f"background-color: #555555; color: white; border: none; padding: 3px;")
         inp.textChanged.connect(self.refresh)
-        
         layout.addWidget(lbl)
         layout.addWidget(inp)
         section.add_widget(row)
@@ -586,15 +778,12 @@ class PackagingApp(QMainWindow):
         row = QWidget()
         l = QHBoxLayout(row)
         l.setContentsMargins(0, 2, 0, 2)
-        
         lbl = QLabel(label_text)
         lbl.setStyleSheet(f"color: {THEME['fg_text']};")
         lbl.setFixedWidth(120)
-        
         inp = QLineEdit(default_val)
         inp.setStyleSheet(f"background-color: #555555; color: white; border: none; padding: 3px;")
         inp.textChanged.connect(self.refresh)
-        
         l.addWidget(lbl)
         l.addWidget(inp)
         layout.addWidget(row)
@@ -611,11 +800,12 @@ class PackagingApp(QMainWindow):
         except ValueError:
             return default
 
+    def on_tab_change(self, idx):
+        if idx == 1: self.refresh()
+
     def refresh(self):
         params = {}
-        for k in self.inputs:
-            params[k] = self.get_float(k)
-        
+        for k in self.inputs: params[k] = self.get_float(k)
         params['fianchi_shape'] = 'ferro' if self.cb_fianchi_shape.isChecked() else 'rect'
         params['fianchi_r_active'] = self.cb_fianchi_r.isChecked()
         params['testate_shape'] = 'ferro' if self.cb_testate_shape.isChecked() else 'rect'
@@ -625,11 +815,48 @@ class PackagingApp(QMainWindow):
         try:
             model = BoxModel(params)
             polygons, cut_lines, crease_lines = model.get_data()
-            self.canvas.set_data(polygons, cut_lines, crease_lines, 
+            self.canvas_2d.set_data(polygons, cut_lines, crease_lines, 
                                  params['L'], params['W'], 
                                  params['h_fianchi'], params['h_testate'], params['F'])
+            self.viewer_3d.set_params(params)
+            self.viewer_3d.update_angles(self.anim_angles)
         except Exception:
             traceback.print_exc()
+
+    def next_animation_step(self):
+        if self.is_animating: return
+        self.tabs.setCurrentIndex(1)
+        
+        steps = ['lembi', 'testate', 'fianchi', 'fasce', 'ext']
+        
+        if self.step_idx >= len(steps):
+            self.step_idx = 0
+            self.anim_angles = {k:0 for k in self.anim_angles}
+            self.refresh()
+            self.btn_play.setText(f"▶ ESEGUI PROSSIMA PIEGA (1/{len(steps)})")
+            return
+
+        self.target_key = steps[self.step_idx]
+        self.anim_progress = 0.0
+        self.is_animating = True
+        self.timer.start(20) 
+
+    def update_frame(self):
+        self.anim_progress += 0.05
+        if self.anim_progress >= 1.0:
+            self.anim_progress = 1.0
+            self.timer.stop()
+            self.is_animating = False
+            self.step_idx += 1
+            
+            steps = ['lembi', 'testate', 'fianchi', 'fasce', 'ext']
+            if self.step_idx >= len(steps):
+                self.btn_play.setText("↺ RESET ANIMAZIONE")
+            else:
+                self.btn_play.setText(f"▶ ESEGUI PROSSIMA PIEGA ({self.step_idx + 1}/{len(steps)})")
+        
+        self.anim_angles[self.target_key] = self.anim_progress * 90
+        self.viewer_3d.update_angles(self.anim_angles)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
