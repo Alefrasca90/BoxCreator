@@ -1,57 +1,64 @@
-import tkinter as tk
-from tkinter import ttk
+import sys
 import traceback
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                               QHBoxLayout, QScrollArea, QPushButton, QLabel, 
+                               QLineEdit, QFrame, QCheckBox, QSizePolicy)
+from PySide6.QtCore import Qt, QPointF
+from PySide6.QtGui import QPainter, QPen, QColor, QPolygonF, QFont
 
 # --- CONFIGURAZIONE COLORI (LOOK & FEEL) ---
 THEME = {
-    # UI Scura (Pannello laterale)
-    "bg_ui": "#2E2E2E",         # Grigio Scuro (Sfondo UI)
-    "bg_panel": "#3C3F41",      # Grigio Medio (Pannelli Input)
-    "fg_text": "#F0F0F0",       # Testo Chiaro
-    
-    # Canvas Chiaro (Area Disegno)
-    "canvas_bg": "#F5F5F5",     # Grigio Chiarissimo (Quasi bianco)
-    
-    # Colori Scatola
-    "cardboard": "#E0C0A0",     # Marroncino Kraft Naturale
-    "platform": "#A1887F",      # Marrone più scuro (Platform/Rinforzi)
-    "highlight": "#81D4FA",     # Azzurro Pastello (Evidenziazione)
-    
-    # Linee Tecniche
-    "line_cut": "#000000",      # Nero (Taglio)
-    "line_crease": "#00C853"    # Verde Tecnico (Piega)
+    "bg_ui": "#2E2E2E",
+    "bg_panel": "#3C3F41",
+    "fg_text": "#F0F0F0",
+    "canvas_bg": "#F5F5F5",
+    "cardboard": "#E0C0A0",     # Colore unico per tutto il cartone
+    "highlight": "#81D4FA",
+    "line_cut": "#000000",
+    "line_crease": "#00C853"
 }
 
 # ==========================================
 # 1. WIDGET UTILS (Interfaccia)
 # ==========================================
-class CollapsibleSection(ttk.Frame):
-    def __init__(self, parent, title, expanded=False):
-        super().__init__(parent, style="Card.TFrame")
+class CollapsibleSection(QWidget):
+    def __init__(self, title, parent=None, expanded=False):
+        super().__init__(parent)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+
+        self.btn_toggle = QPushButton(f"▼ {title}" if expanded else f"▶ {title}")
+        self.btn_toggle.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {THEME['bg_panel']};
+                color: {THEME['fg_text']};
+                text-align: left;
+                padding: 5px;
+                border: none;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: {THEME['bg_ui']}; }}
+        """)
+        self.btn_toggle.clicked.connect(self.toggle)
+        self.layout.addWidget(self.btn_toggle)
+
+        self.content_area = QWidget()
+        self.content_layout = QVBoxLayout(self.content_area)
+        self.content_layout.setContentsMargins(5, 5, 5, 5)
+        self.layout.addWidget(self.content_area)
+
         self.expanded = expanded
-        
-        # Header Button senza bordi fastidiosi
-        self.btn_toggle = tk.Button(self, text=f"▼ {title}" if expanded else f"▶ {title}", 
-                                    command=self.toggle, 
-                                    bg=THEME["bg_panel"], fg=THEME["fg_text"],
-                                    activebackground=THEME["bg_ui"], activeforeground=THEME["fg_text"],
-                                    relief="flat", bd=0, highlightthickness=0, # RIMUOVE BORDI BIANCHI
-                                    anchor="w", padx=10, font=("Segoe UI", 10, "bold"))
-        self.btn_toggle.pack(fill="x", anchor="n", pady=1)
-        
-        self.content_frame = ttk.Frame(self, style="Card.TFrame")
-        if expanded:
-            self.content_frame.pack(fill="x", expand=True, padx=5, pady=5)
+        self.content_area.setVisible(expanded)
+        self.title_text = title
 
     def toggle(self):
         self.expanded = not self.expanded
-        title = self.btn_toggle.cget("text")[2:]
-        if self.expanded:
-            self.btn_toggle.config(text=f"▼ {title}")
-            self.content_frame.pack(fill="x", expand=True, padx=5, pady=5)
-        else:
-            self.btn_toggle.config(text=f"▶ {title}")
-            self.content_frame.pack_forget()
+        self.btn_toggle.setText(f"▼ {self.title_text}" if self.expanded else f"▶ {self.title_text}")
+        self.content_area.setVisible(self.expanded)
+
+    def add_widget(self, widget):
+        self.content_layout.addWidget(widget)
 
 # ==========================================
 # 2. MOTORE GEOMETRICO
@@ -165,8 +172,10 @@ class BoxModel:
             p_sh_sx = (shoulder, -H_full); p_u_sx = (shoulder, -h_low)
             p_u_dx = (W - shoulder, -h_low); p_sh_dx = (W - shoulder, -H_full)
             
-            if has_platform: creases.append([curr, p_sh_sx])
-            else: cuts.append([curr, p_sh_sx])
+            if not has_platform:
+                cuts.append([curr, p_sh_sx])
+            # Se platform attiva, questo segmento è gestito da create_unit
+            
             curr = p_sh_sx; pts_poly.append(curr)
             
             cuts.append([curr, p_u_sx]); curr = p_u_sx; pts_poly.append(curr)
@@ -183,13 +192,14 @@ class BoxModel:
             cuts.append([curr, p_sh_dx]); curr = p_sh_dx; pts_poly.append(curr)
             
             target = (W, -H_full)
-            if has_platform: creases.append([curr, target])
-            else: cuts.append([curr, target])
+            if not has_platform:
+                cuts.append([curr, target])
+            
             curr = target; pts_poly.append(curr)
         else:
             target = (W, -H_full)
-            if has_platform: creases.append([curr, target])
-            else: cuts.append([curr, target])
+            if not has_platform:
+                cuts.append([curr, target])
             curr = target; pts_poly.append(curr)
             
         creases.append([curr, (W, 0)]); curr = (W, 0); pts_poly.append(curr)
@@ -217,13 +227,18 @@ class BoxModel:
         def create_unit(u_s, u_e, left, right):
             v_b, v_t = -H_t, -(H_t + Fascia_H)
             f_poly = [(u_s, v_b), (u_s, v_t), (u_e, v_t), (u_e, v_b)]
-            f_cr = [[(u_s, v_b), (u_e, v_b)]]
+            
+            f_cr = [[(u_s, v_b), (u_e, v_b)]] 
             f_ct = [[(u_s, v_t), (u_e, v_t)]]
             
             if left:
                 f_cr.append([(u_s, v_b), (u_s, v_t)])
                 l_poly = [(u_s-Plat_W, v_b), (u_s-Plat_W, v_t), (u_s, v_t), (u_s, v_b)]
-                l_ct = [[(u_s-Plat_W, v_b), (u_s-Plat_W, v_t)], [(u_s-Plat_W, v_t), (u_s, v_t)], [(u_s, v_b), (u_s-Plat_W, v_b)]]
+                l_ct = [
+                    [(u_s-Plat_W, v_b), (u_s-Plat_W, v_t)], 
+                    [(u_s-Plat_W, v_t), (u_s, v_t)],        
+                    [(u_s, v_b), (u_s-Plat_W, v_b)]         
+                ]
                 parts.append((l_poly, [], l_ct, 'platform_flap'))
             else:
                 f_ct.append([(u_s, v_b), (u_s, v_t)])
@@ -231,7 +246,11 @@ class BoxModel:
             if right:
                 f_cr.append([(u_e, v_b), (u_e, v_t)])
                 r_poly = [(u_e, v_b), (u_e, v_t), (u_e+Plat_W, v_t), (u_e+Plat_W, v_b)]
-                r_ct = [[(u_e, v_t), (u_e+Plat_W, v_t)], [(u_e+Plat_W, v_t), (u_e+Plat_W, v_b)], [(u_e+Plat_W, v_b), (u_e, v_b)]]
+                r_ct = [
+                    [(u_e, v_t), (u_e+Plat_W, v_t)],        
+                    [(u_e+Plat_W, v_t), (u_e+Plat_W, v_b)], 
+                    [(u_e+Plat_W, v_b), (u_e, v_b)]         
+                ]
                 parts.append((r_poly, [], r_ct, 'platform_flap'))
             else:
                 f_ct.append([(u_e, v_b), (u_e, v_t)])
@@ -278,8 +297,13 @@ class BoxModel:
         final_pts = self._rotate_points(pts_local, corner)
         cuts = []
         for i in range(len(final_pts)-1): cuts.append([final_pts[i], final_pts[i+1]])
-        crease = [final_pts[0], final_pts[-1]]
-        return final_pts, cuts, crease
+        
+        # FIX PRINCIPALE:
+        # Non restituiamo la "crease" (linea di piega) qui perché coincide con il bordo 
+        # della Testata che ha già la sua linea. Questo evita la sovrapposizione.
+        # crease = [final_pts[0], final_pts[-1]] 
+        
+        return final_pts, cuts, [] # Restituisci lista vuota per la piega
 
     def get_data(self):
         polygons, cut_lines, crease_lines = [], [], []
@@ -320,189 +344,295 @@ class BoxModel:
             g_pts, g_cuts, g_crease = self._get_flap_geo(c, H_t, F)
             pts_off = [(x+ox, y+oy) for x,y in g_pts]
             cuts_off = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in g_cuts]
-            crease_off = [(p[0]+ox, p[1]+oy) for p in g_crease]
+            
+            # Gestione sicura nel caso g_crease sia vuoto
+            if g_crease:
+                crease_off = [(p[0]+ox, p[1]+oy) for p in g_crease]
+                crease_lines.append(crease_off)
+            
             polygons.append({'id': 'poly_lembi', 'type': 'lembi', 'coords': pts_off})
             cut_lines.extend(cuts_off)
-            crease_lines.append(crease_off)
 
         return polygons, cut_lines, crease_lines
 
 # ==========================================
-# 3. APP PRINCIPALE
+# 3. APP PRINCIPALE (UI Ported to Qt)
 # ==========================================
-class PackagingApp(tk.Tk):
+class DrawingArea(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.model_data = ([], [], [])  # Polys, Cuts, Creases
+        self.params_L = 100
+        self.params_W = 100
+        self.params_HF = 10
+        self.params_HT = 10
+        self.params_F = 10
+        self.bg_color = QColor(THEME["canvas_bg"])
+    
+    def set_data(self, polys, cuts, creases, L, W, h_f, h_t, F):
+        self.model_data = (polys, cuts, creases)
+        self.params_L = L
+        self.params_W = W
+        self.params_HF = h_f
+        self.params_HT = h_t
+        self.params_F = F
+        self.update() # Trigger paintEvent
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Sfondo
+        painter.fillRect(self.rect(), self.bg_color)
+        
+        cw, ch = self.width(), self.height()
+        if cw < 50: return
+
+        polygons, cut_lines, crease_lines = self.model_data
+        
+        # Logica di Scaling
+        tot_w = self.params_L + self.params_HT*2 + 300
+        tot_h = self.params_W + self.params_HF*2 + self.params_F*2 + 200
+        
+        if tot_w == 0: tot_w = 1
+        if tot_h == 0: tot_h = 1
+
+        scale = min(cw/tot_w, ch/tot_h) * 0.8
+        
+        ox_model = max(self.params_HT, self.params_HF) + 100
+        oy_model = max(self.params_HT, self.params_HF) + self.params_F + 50
+        
+        dx = (cw/2) - (ox_model + self.params_L/2)*scale
+        dy = (ch/2) - (oy_model + self.params_W/2)*scale
+
+        # --- 1. Draw Polygons ---
+        for p in polygons:
+            pts = [QPointF(x*scale+dx, y*scale+dy) for x, y in p['coords']]
+            qpoly = QPolygonF(pts)
+            
+            base_col = QColor(THEME["cardboard"])
+            
+            painter.setBrush(base_col)
+            painter.setPen(Qt.NoPen)
+            painter.drawPolygon(qpoly)
+
+        # --- 2. Draw Creases ---
+        crease_pen = QPen(QColor(THEME["line_crease"]))
+        crease_pen.setWidthF(1.5)
+        # Tratteggio fitto per linee corte
+        crease_pen.setStyle(Qt.CustomDashLine) 
+        crease_pen.setDashPattern([2, 3]) 
+        
+        painter.setPen(crease_pen)
+        
+        for line in crease_lines:
+            pts = [QPointF(pt[0]*scale+dx, pt[1]*scale+dy) for pt in line]
+            if len(pts) >= 2:
+                painter.drawPolyline(pts)
+
+        # --- 3. Draw Cuts ---
+        cut_pen = QPen(QColor(THEME["line_cut"]))
+        cut_pen.setWidthF(2.0)
+        cut_pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(cut_pen)
+        
+        for line in cut_lines:
+             pts = [QPointF(pt[0]*scale+dx, pt[1]*scale+dy) for pt in line]
+             if len(pts) >= 2:
+                painter.drawPolyline(pts)
+
+class PackagingApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.title("Packaging CAD Pro")
-        self.geometry("1400x950")
-        
-        self.configure(bg=THEME["bg_ui"])
-        style = ttk.Style()
-        style.theme_use('clam')
-        
-        # Styles
-        style.configure(".", background=THEME["bg_ui"], foreground=THEME["fg_text"], borderwidth=0)
-        style.configure("TLabel", background=THEME["bg_panel"], foreground=THEME["fg_text"])
-        style.configure("TEntry", fieldbackground="#555555", foreground="white", insertcolor="white", borderwidth=0)
-        style.configure("TButton", background=THEME["bg_panel"], foreground=THEME["fg_text"], borderwidth=0)
-        style.map("TButton", background=[("active", THEME["bg_ui"])])
-        style.configure("TCheckbutton", background=THEME["bg_panel"], foreground=THEME["fg_text"])
-        style.map("TCheckbutton", background=[("active", THEME["bg_panel"])])
-        style.configure("Card.TFrame", background=THEME["bg_panel"], relief="flat")
+        self.setWindowTitle("Packaging CAD Pro (Qt Version)")
+        self.resize(1400, 950)
+        self.setStyleSheet(f"QMainWindow {{ background-color: {THEME['bg_ui']}; }}")
 
-        self.params_vars = {}
+        # Main Widget & Layout
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QHBoxLayout(main_widget)
+        main_layout.setContentsMargins(0,0,0,0)
+        main_layout.setSpacing(0)
+
+        # 1. Left Panel (Scrollable)
+        scroll = QScrollArea()
+        scroll.setFixedWidth(400)
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {THEME['bg_ui']}; }}")
         
-        self.paned = tk.PanedWindow(self, orient=tk.HORIZONTAL, bg=THEME["bg_ui"], sashwidth=4, sashrelief="flat", bd=0)
-        self.paned.pack(fill=tk.BOTH, expand=True)
+        self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet(f"QWidget {{ background-color: {THEME['bg_ui']}; color: {THEME['fg_text']}; }}")
+        self.panel_layout = QVBoxLayout(self.scroll_content)
+        self.panel_layout.setAlignment(Qt.AlignTop)
+        scroll.setWidget(self.scroll_content)
         
-        self.input_container = tk.Frame(self.paned, bg=THEME["bg_ui"], bd=0, highlightthickness=0)
-        self.canvas_scroll = tk.Canvas(self.input_container, width=380, bg=THEME["bg_ui"], bd=0, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self.input_container, orient="vertical", command=self.canvas_scroll.yview)
-        self.scroll_frame = ttk.Frame(self.canvas_scroll, style="Card.TFrame")
-        
-        self.scroll_frame.bind("<Configure>", lambda e: self.canvas_scroll.configure(scrollregion=self.canvas_scroll.bbox("all")))
-        self.canvas_window = self.canvas_scroll.create_window((0, 0), window=self.scroll_frame, anchor="nw")
-        self.canvas_scroll.configure(yscrollcommand=self.scrollbar.set)
-        
-        self.canvas_scroll.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
-        self.paned.add(self.input_container)
-        
-        self.draw_frame = tk.Frame(self.paned, bg=THEME["canvas_bg"], bd=0, highlightthickness=0)
-        self.paned.add(self.draw_frame)
-        self.canvas = tk.Canvas(self.draw_frame, bg=THEME["canvas_bg"], bd=0, highlightthickness=0)
-        self.canvas.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        main_layout.addWidget(scroll)
+
+        # 2. Right Canvas
+        self.canvas = DrawingArea()
+        main_layout.addWidget(self.canvas)
+
+        self.inputs = {}
         
         self.build_ui()
-        
-        self.canvas_scroll.bind("<Configure>", lambda e: self.canvas_scroll.itemconfig(self.canvas_window, width=e.width))
-        self.canvas.bind("<Configure>", lambda e: self.refresh())
-        self.after(200, self.refresh)
+        self.refresh()
 
     def build_ui(self):
-        header = tk.Label(self.scroll_frame, text="PARAMETRI PROGETTO", 
-                         font=("Segoe UI", 12, "bold", "italic"), 
-                         bg=THEME["bg_panel"], fg=THEME["highlight"], pady=20)
-        header.pack(fill="x")
-        
+        header = QLabel("PARAMETRI PROGETTO")
+        header.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {THEME['highlight']}; padding: 20px;")
+        header.setAlignment(Qt.AlignCenter)
+        self.panel_layout.addWidget(header)
+
         # FONDO
-        sec = CollapsibleSection(self.scroll_frame, "1. Fondo", expanded=True)
-        sec.pack(fill="x", pady=2, padx=5)
-        self.add_entry(sec.content_frame, "Lunghezza (L)", "L", 400, ["fondo", "fianchi", "testate"])
-        self.add_entry(sec.content_frame, "Larghezza (W)", "W", 300, ["fondo", "testate", "fianchi"])
-        self.add_entry(sec.content_frame, "Spessore", "thickness", 5.0, ["fondo", "lembi"])
-        
+        sec = CollapsibleSection("1. Fondo", self.scroll_content, expanded=True)
+        self.panel_layout.addWidget(sec)
+        self.add_entry(sec, "Lunghezza (L)", "L", "400")
+        self.add_entry(sec, "Larghezza (W)", "W", "300")
+        self.add_entry(sec, "Spessore", "thickness", "5.0")
+
         # FIANCATE
-        sec = CollapsibleSection(self.scroll_frame, "2. Fiancate", expanded=True)
-        sec.pack(fill="x", pady=2, padx=5)
-        self.add_entry(sec.content_frame, "Altezza", "h_fianchi", 100, ["fianchi"])
-        self.params_vars['fianchi_shape'] = tk.StringVar(value="ferro")
-        ttk.Checkbutton(sec.content_frame, text="Ferro di Cavallo", variable=self.params_vars['fianchi_shape'], 
-                        onvalue="ferro", offvalue="rect", command=self.refresh).pack(anchor="w", padx=5)
-        self.f_ferro_frame = ttk.Frame(sec.content_frame, style="Card.TFrame")
-        self.f_ferro_frame.pack(fill="x", padx=15)
-        self.add_entry(self.f_ferro_frame, "Altezza Min", "fianchi_h_low", 60, ["fianchi"])
-        self.add_entry(self.f_ferro_frame, "Spalla", "fianchi_shoulder", 80, ["fianchi"])
-        self.params_vars['fianchi_r_active'] = tk.BooleanVar(value=True)
-        ttk.Checkbutton(self.f_ferro_frame, text="Raddoppio (Rinforzo)", variable=self.params_vars['fianchi_r_active'], command=self.refresh).pack(anchor="w")
-        self.add_entry(self.f_ferro_frame, "Alt. Rinforzo", "fianchi_r_h", 40, ["fianchi"])
-        self.add_entry(self.f_ferro_frame, "Gap Lat. Rinf.", "fianchi_r_gap", 2, ["fianchi"])
+        sec = CollapsibleSection("2. Fiancate", self.scroll_content, expanded=True)
+        self.panel_layout.addWidget(sec)
+        self.add_entry(sec, "Altezza", "h_fianchi", "100")
         
+        self.cb_fianchi_shape = QCheckBox("Ferro di Cavallo")
+        self.cb_fianchi_shape.setChecked(True)
+        self.cb_fianchi_shape.toggled.connect(self.on_structure_change)
+        sec.add_widget(self.cb_fianchi_shape)
+
+        self.f_ferro_container = QWidget()
+        f_ferro_layout = QVBoxLayout(self.f_ferro_container)
+        f_ferro_layout.setContentsMargins(10,0,0,0)
+        sec.add_widget(self.f_ferro_container)
+        
+        self.add_entry_to_layout(f_ferro_layout, "Altezza Min", "fianchi_h_low", "60")
+        self.add_entry_to_layout(f_ferro_layout, "Spalla", "fianchi_shoulder", "80")
+        
+        self.cb_fianchi_r = QCheckBox("Raddoppio (Rinforzo)")
+        self.cb_fianchi_r.setChecked(True)
+        self.cb_fianchi_r.toggled.connect(self.refresh)
+        f_ferro_layout.addWidget(self.cb_fianchi_r)
+        
+        self.add_entry_to_layout(f_ferro_layout, "Alt. Rinforzo", "fianchi_r_h", "40")
+        self.add_entry_to_layout(f_ferro_layout, "Gap Lat. Rinf.", "fianchi_r_gap", "2")
+
         # TESTATE
-        sec = CollapsibleSection(self.scroll_frame, "3. Testate", expanded=True)
-        sec.pack(fill="x", pady=2, padx=5)
-        self.add_entry(sec.content_frame, "Altezza", "h_testate", 100, ["testate", "lembi", "platform"])
-        self.params_vars['testate_shape'] = tk.StringVar(value="ferro")
-        ttk.Checkbutton(sec.content_frame, text="Ferro di Cavallo", variable=self.params_vars['testate_shape'], 
-                        onvalue="ferro", offvalue="rect", command=self.refresh).pack(anchor="w", padx=5)
-        self.t_ferro_frame = ttk.Frame(sec.content_frame, style="Card.TFrame")
-        self.t_ferro_frame.pack(fill="x", padx=15)
-        self.add_entry(self.t_ferro_frame, "Altezza Min", "testate_h_low", 60, ["testate"])
-        self.add_entry(self.t_ferro_frame, "Spalla", "testate_shoulder", 50, ["testate", "platform"])
-        self.params_vars['testate_r_active'] = tk.BooleanVar(value=True)
-        ttk.Checkbutton(self.t_ferro_frame, text="Raddoppio (Rinforzo)", variable=self.params_vars['testate_r_active'], command=self.refresh).pack(anchor="w")
-        self.add_entry(self.t_ferro_frame, "Alt. Rinforzo", "testate_r_h", 30, ["testate"])
-        self.add_entry(self.t_ferro_frame, "Gap Rinforzo", "testate_r_gap", 2, ["testate"])
+        sec = CollapsibleSection("3. Testate", self.scroll_content, expanded=True)
+        self.panel_layout.addWidget(sec)
+        self.add_entry(sec, "Altezza", "h_testate", "100")
         
+        self.cb_testate_shape = QCheckBox("Ferro di Cavallo")
+        self.cb_testate_shape.setChecked(True)
+        self.cb_testate_shape.toggled.connect(self.on_structure_change)
+        sec.add_widget(self.cb_testate_shape)
+        
+        self.t_ferro_container = QWidget()
+        t_ferro_layout = QVBoxLayout(self.t_ferro_container)
+        t_ferro_layout.setContentsMargins(10,0,0,0)
+        sec.add_widget(self.t_ferro_container)
+
+        self.add_entry_to_layout(t_ferro_layout, "Altezza Min", "testate_h_low", "60")
+        self.add_entry_to_layout(t_ferro_layout, "Spalla", "testate_shoulder", "50")
+        
+        self.cb_testate_r = QCheckBox("Raddoppio (Rinforzo)")
+        self.cb_testate_r.setChecked(True)
+        self.cb_testate_r.toggled.connect(self.refresh)
+        t_ferro_layout.addWidget(self.cb_testate_r)
+        
+        self.add_entry_to_layout(t_ferro_layout, "Alt. Rinforzo", "testate_r_h", "30")
+        self.add_entry_to_layout(t_ferro_layout, "Gap Rinforzo", "testate_r_gap", "2")
+
         # PLATFORM
-        sec = CollapsibleSection(self.scroll_frame, "4. Platform")
-        sec.pack(fill="x", pady=2, padx=5)
-        self.params_vars['platform_active'] = tk.BooleanVar(value=True)
-        ttk.Checkbutton(sec.content_frame, text="Attiva Platform", variable=self.params_vars['platform_active'], command=self.refresh).pack(anchor="w", padx=5)
-        self.add_entry(sec.content_frame, "Altezza Fascia", "fascia_h", 35, ["platform", "fianchi"])
-        self.add_entry(sec.content_frame, "Larg. Lembo Ext", "plat_flap_w", 40, ["platform", "fianchi"])
-        self.add_entry(sec.content_frame, "Gap Platform", "plat_gap", 3, ["platform", "fianchi"])
+        sec = CollapsibleSection("4. Platform", self.scroll_content)
+        self.panel_layout.addWidget(sec)
         
+        self.cb_plat_active = QCheckBox("Attiva Platform")
+        self.cb_plat_active.setChecked(True)
+        self.cb_plat_active.toggled.connect(self.refresh)
+        sec.add_widget(self.cb_plat_active)
+        
+        self.add_entry(sec, "Altezza Fascia", "fascia_h", "35")
+        self.add_entry(sec, "Larg. Lembo Ext", "plat_flap_w", "40")
+        self.add_entry(sec, "Gap Platform", "plat_gap", "3")
+
         # LEMBI
-        sec = CollapsibleSection(self.scroll_frame, "5. Lembi Interni")
-        sec.pack(fill="x", pady=2, padx=5)
-        self.add_entry(sec.content_frame, "Lunghezza", "F", 120, ["lembi"])
+        sec = CollapsibleSection("5. Lembi Interni", self.scroll_content)
+        self.panel_layout.addWidget(sec)
+        self.add_entry(sec, "Lunghezza", "F", "120")
 
-    def add_entry(self, parent, label, key, val, tags):
-        f = tk.Frame(parent, bg=THEME["bg_panel"])
-        f.pack(fill="x", pady=2)
-        tk.Label(f, text=label, bg=THEME["bg_panel"], fg=THEME["fg_text"], width=20, anchor="w").pack(side="left")
-        if key not in self.params_vars: self.params_vars[key] = tk.DoubleVar(value=val)
-        e = ttk.Entry(f, textvariable=self.params_vars[key], width=8)
-        e.pack(side="right", padx=5)
+        self.panel_layout.addStretch()
+
+    def add_entry(self, section, label_text, key, default_val):
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 2, 0, 2)
         
-        e.bind("<Enter>", lambda e: self.highlight(tags, True))
-        e.bind("<Leave>", lambda e: self.highlight(tags, False))
-        e.bind("<KeyRelease>", lambda e: self.refresh())
+        lbl = QLabel(label_text)
+        lbl.setStyleSheet(f"color: {THEME['fg_text']};")
+        lbl.setFixedWidth(120)
+        
+        inp = QLineEdit(default_val)
+        inp.setStyleSheet(f"background-color: #555555; color: white; border: none; padding: 3px;")
+        inp.textChanged.connect(self.refresh)
+        
+        layout.addWidget(lbl)
+        layout.addWidget(inp)
+        section.add_widget(row)
+        self.inputs[key] = inp
 
-    def highlight(self, tags, active):
-        if not active:
-            self.refresh()
-            return
-        for type_tag in tags:
-            self.canvas.itemconfigure(type_tag, fill=THEME["highlight"])
+    def add_entry_to_layout(self, layout, label_text, key, default_val):
+        row = QWidget()
+        l = QHBoxLayout(row)
+        l.setContentsMargins(0, 2, 0, 2)
+        
+        lbl = QLabel(label_text)
+        lbl.setStyleSheet(f"color: {THEME['fg_text']};")
+        lbl.setFixedWidth(120)
+        
+        inp = QLineEdit(default_val)
+        inp.setStyleSheet(f"background-color: #555555; color: white; border: none; padding: 3px;")
+        inp.textChanged.connect(self.refresh)
+        
+        l.addWidget(lbl)
+        l.addWidget(inp)
+        layout.addWidget(row)
+        self.inputs[key] = inp
+
+    def on_structure_change(self):
+        self.f_ferro_container.setVisible(self.cb_fianchi_shape.isChecked())
+        self.t_ferro_container.setVisible(self.cb_testate_shape.isChecked())
+        self.refresh()
+
+    def get_float(self, key, default=0.0):
+        try:
+            return float(self.inputs[key].text())
+        except ValueError:
+            return default
 
     def refresh(self):
-        if self.params_vars['fianchi_shape'].get() == 'ferro': self.f_ferro_frame.pack(fill="x", padx=15)
-        else: self.f_ferro_frame.pack_forget()
-        if self.params_vars['testate_shape'].get() == 'ferro': self.t_ferro_frame.pack(fill="x", padx=15)
-        else: self.t_ferro_frame.pack_forget()
+        params = {}
+        for k in self.inputs:
+            params[k] = self.get_float(k)
+        
+        params['fianchi_shape'] = 'ferro' if self.cb_fianchi_shape.isChecked() else 'rect'
+        params['fianchi_r_active'] = self.cb_fianchi_r.isChecked()
+        params['testate_shape'] = 'ferro' if self.cb_testate_shape.isChecked() else 'rect'
+        params['testate_r_active'] = self.cb_testate_r.isChecked()
+        params['platform_active'] = self.cb_plat_active.isChecked()
 
         try:
-            self.canvas.delete("all")
-            params = {k: v.get() for k, v in self.params_vars.items()}
             model = BoxModel(params)
             polygons, cut_lines, crease_lines = model.get_data()
-            
-            cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
-            if cw < 50: return
-            
-            tot_w = params['L'] + params['h_testate']*2 + 300
-            tot_h = params['W'] + params['h_fianchi']*2 + params['F']*2 + 200
-            scale = min(cw/tot_w, ch/tot_h) * 0.8
-            ox_model = max(params['h_testate'], params['h_fianchi']) + 100
-            oy_model = max(params['h_testate'], params['h_fianchi']) + params['F'] + 50
-            dx = (cw/2) - (ox_model + params['L']/2)*scale
-            dy = (ch/2) - (oy_model + params['W']/2)*scale
-            
-            # Draw Polygons
-            for p in polygons:
-                pts = [c for x, y in p['coords'] for c in (x*scale+dx, y*scale+dy)]
-                # Determine Color
-                base_col = THEME["cardboard"]
-                if 'platform' in p.get('type', ''): base_col = THEME["platform"]
-                
-                self.canvas.create_polygon(pts, fill=base_col, outline="", tags=p.get('type', ''))
-
-            # Draw Creases
-            for line in crease_lines:
-                pts = [c for pt in line for c in (pt[0]*scale+dx, pt[1]*scale+dy)]
-                self.canvas.create_line(pts, fill=THEME["line_crease"], width=1.5, dash=(4, 2))
-
-            # Draw Cuts
-            for line in cut_lines:
-                pts = [c for pt in line for c in (pt[0]*scale+dx, pt[1]*scale+dy)]
-                self.canvas.create_line(pts, fill=THEME["line_cut"], width=2, capstyle=tk.ROUND)
-
-        except Exception as e:
+            self.canvas.set_data(polygons, cut_lines, crease_lines, 
+                                 params['L'], params['W'], 
+                                 params['h_fianchi'], params['h_testate'], params['F'])
+        except Exception:
             traceback.print_exc()
-            self.canvas.create_text(20, 20, anchor="nw", text=f"ERROR: {e}", fill="red")
 
 if __name__ == "__main__":
-    app = PackagingApp()
-    app.mainloop()
+    app = QApplication(sys.argv)
+    window = PackagingApp()
+    window.show()
+    sys.exit(app.exec())
