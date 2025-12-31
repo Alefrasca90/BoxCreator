@@ -17,7 +17,7 @@ THEME = {
     # 2D
     "cardboard": "#E0C0A0",
     
-    # 3D: Brown = Interno (Sopra), White = Esterno (Sotto)
+    # 3D: Brown = Interno, White = Esterno
     "brown_opaque": QColor(190, 150, 110, 255),
     "white_opaque": QColor(240, 240, 240, 255),
     "brown_alpha":  QColor(190, 150, 110, 180),
@@ -361,20 +361,20 @@ class Scene3D:
         
         # 2. FIANCATE
         v_f_top = [(-L/2, -H_f, 0), (-L/2, 0, 0), (L/2, 0, 0), (L/2, -H_f, 0)]
-        fianco_top = Part3D("Fianco_Top", v_f_top, fondo, (0, -W/2, 0), 'x', -1) 
+        fianco_top = Part3D("Fianco_Top", v_f_top, fondo, (0, -W/2, 0), 'x', 1) 
         self.parts.append(fianco_top)
         
         v_f_btm = [(-L/2, 0, 0), (-L/2, H_f, 0), (L/2, H_f, 0), (L/2, 0, 0)]
-        fianco_btm = Part3D("Fianco_Btm", v_f_btm, fondo, (0, W/2, 0), 'x', 1) 
+        fianco_btm = Part3D("Fianco_Btm", v_f_btm, fondo, (0, W/2, 0), 'x', -1) 
         self.parts.append(fianco_btm)
         
         # 3. TESTATE
         v_t_left = [(-H_t, -W/2, 0), (-H_t, W/2, 0), (0, W/2, 0), (0, -W/2, 0)]
-        testata_sx = Part3D("Testata_L", v_t_left, fondo, (-L/2, 0, 0), 'y', 1) 
+        testata_sx = Part3D("Testata_L", v_t_left, fondo, (-L/2, 0, 0), 'y', -1) 
         self.parts.append(testata_sx)
         
         v_t_right = [(0, -W/2, 0), (0, W/2, 0), (H_t, W/2, 0), (H_t, -W/2, 0)]
-        testata_dx = Part3D("Testata_R", v_t_right, fondo, (L/2, 0, 0), 'y', -1) 
+        testata_dx = Part3D("Testata_R", v_t_right, fondo, (L/2, 0, 0), 'y', 1) 
         self.parts.append(testata_dx)
         
         # 4. LEMBI (Figli Testate)
@@ -423,7 +423,7 @@ class Scene3D:
             pfr_btm = Part3D("PFlap_R_Btm", v_pfr_btm, fascia_r, (0, W/2, 0), 'x', -1)
             self.parts.append(pfr_btm)
 
-    def get_polygons_to_draw(self):
+    def get_world_polygons(self):
         transforms = {} 
         def get_tr(part):
             if part in transforms: return transforms[part]
@@ -435,15 +435,7 @@ class Scene3D:
         for p in self.parts:
             tr = get_tr(p)
             w_verts = [tr(v) for v in p.local_vertices]
-            
-            z_list = [v[2] for v in w_verts]
-            z_sort_key = min(z_list) if z_list else 0
-            if p.name == "Fondo": z_sort_key = -99999
-            
-            polys.append((z_sort_key, w_verts, p.name))
-        
-        # FIX: Ordine Inverso (Painter's Algorithm Corretto: Disegna dal LONTANO al VICINO)
-        polys.sort(key=lambda x: x[0], reverse=True) 
+            polys.append((w_verts, p.name))
         return polys
 
 class Viewer3D(QWidget):
@@ -486,51 +478,81 @@ class Viewer3D(QWidget):
         
         w, h = self.width(), self.height()
         
+        # 1. Calcolo Matrice Camera (View Rotation)
         rad_p = math.radians(self.cam_pitch)
         rad_y = math.radians(self.cam_yaw)
         cp, sp = math.cos(rad_p), math.sin(rad_p)
         cy, sy = math.cos(rad_y), math.sin(rad_y)
         
-        def project(v):
+        def world_to_view(v):
             x, y, z = v
+            # Yaw 
             rx = x*cy - y*sy
             ry = x*sy + y*cy
-            rz = z
-            y2 = ry*cp - rz*sp
-            z2 = ry*sp + rz*cp
-            
-            factor = 1000 / (1000 + z2) if (1000+z2) != 0 else 1
-            sx = rx * factor * self.scale + w/2
-            screen_y = -y2 * factor * self.scale + h/2 
-            return QPointF(sx, screen_y)
+            # Pitch
+            y_view = ry*cp - z*sp
+            z_view = ry*sp + z*cp
+            return (rx, y_view, z_view)
 
-        polys = self.scene.get_polygons_to_draw()
+        # 2. Ottieni poligoni world space
+        world_polys = self.scene.get_world_polygons()
         
-        for z, verts, name in polys:
-            pts = [project(v) for v in verts]
+        # 3. Trasforma in View Space e calcola Z-Depth
+        render_list = []
+        for verts, name in world_polys:
+            view_verts = [world_to_view(v) for v in verts]
             
-            # Calcolo Area (Shoelace)
+            if view_verts:
+                z_depth = sum(v[2] for v in view_verts) / len(view_verts)
+            else:
+                z_depth = 0
+            
+            # --- FIX COMPENETRAZIONE LEMBI ---
+            # Aggiungiamo un bias positivo alla profondità Z per le parti interne (Lembi).
+            # Nel Painter's Algorithm (reverse=True), Z più grande viene disegnato PRIMA.
+            # Quindi aumentando Z, li spingiamo "in fondo" alla lista di disegno,
+            # assicurando che vengano coperti dalle facce esterne (Fianchi/Testate)
+            # che hanno Z minore (più vicine alla camera).
+            if "Lembo" in name or "PFlap" in name or "Fascia" in name:
+                z_depth += 0.5 
+
+            render_list.append((z_depth, view_verts))
+            
+        # 4. Ordina per profondità (Lontano -> Vicino)
+        render_list.sort(key=lambda x: x[0], reverse=True)
+        
+        # 5. Proiezione e Disegno
+        for z_depth, v_verts in render_list:
+            pts_2d = []
+            for vx, vy, vz in v_verts:
+                factor = 1000 / (1000 + vz) if (1000 + vz) != 0 else 1
+                sx = vx * factor * self.scale + w/2
+                sy = -vy * factor * self.scale + h/2
+                pts_2d.append(QPointF(sx, sy))
+            
             area = 0.0
-            for i in range(len(pts)):
-                p1 = pts[i]
-                p2 = pts[(i+1) % len(pts)]
+            for i in range(len(pts_2d)):
+                p1 = pts_2d[i]
+                p2 = pts_2d[(i+1) % len(pts_2d)]
                 area += (p2.x() - p1.x()) * (p2.y() + p1.y())
             
-            # FIX: In Qt Y è invertita, quindi area < 0 significa CCW (Faccia Frontale)
             is_front = area < 0
             
+            # --- INVERSIONE COLORI RICHIESTA ---
+            # is_front (Interno) -> Marrone
+            # !is_front (Esterno) -> Bianco
             if is_front:
                 base_c = THEME["brown_alpha"] if self.transparency_mode else THEME["brown_opaque"]
             else:
                 base_c = THEME["white_alpha"] if self.transparency_mode else THEME["white_opaque"]
             
-            shade = max(0, min(40, int(z * 0.15 + 15)))
+            shade = max(0, min(40, int(z_depth * 0.15 + 15)))
             r, g, b, a = base_c.red(), base_c.green(), base_c.blue(), base_c.alpha()
             final_c = QColor(max(0, r - shade), max(0, g - shade), max(0, b - shade), a)
             
             painter.setBrush(final_c)
             painter.setPen(QPen(Qt.black, 2.0))
-            painter.drawPolygon(QPolygonF(pts))
+            painter.drawPolygon(QPolygonF(pts_2d))
 
     def mousePressEvent(self, e):
         self.drag_start = e.position().toPoint()
