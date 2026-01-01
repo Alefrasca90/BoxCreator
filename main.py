@@ -19,10 +19,10 @@ THEME = {
     
     # 3D COLORS
     # Marrone = Interno (Frontale), Bianco = Esterno (Retro)
-    "brown_opaque": QColor(139, 100, 60, 255),
-    "brown_alpha":  QColor(139, 100, 60, 200),
+    "brown_opaque": QColor(139, 100, 60, 255), 
+    "brown_alpha":  QColor(139, 100, 60, 255), 
     "white_opaque": QColor(240, 240, 240, 255),
-    "white_alpha":  QColor(240, 240, 240, 200),
+    "white_alpha":  QColor(240, 240, 240, 255),
     
     "highlight": "#81D4FA",
     "line_cut": "#000000",
@@ -95,18 +95,19 @@ class BoxModel:
         return final
 
     def _get_fianco_geometry(self, L_base, H_full, orientation):
+        T = self.p.get('thickness', 5.0)
         has_platform = self.p.get('platform_active', False)
         is_ferro = (self.p.get('fianchi_shape') == 'ferro')
         has_reinf = is_ferro and self.p.get('fianchi_r_active', False)
         
-        notch_w, notch_h = 0, 0
-        if has_platform:
-            notch_h = self.p.get('plat_flap_w', 30) + self.p.get('plat_gap', 2)
-            notch_w = self.p.get('fascia_h', 30) + self.p.get('plat_gap', 2)
-            if notch_h > H_full: notch_h = H_full - 5
+        # Scassi allargati di T
+        notch_h = self.p.get('plat_flap_w', 30) + self.p.get('plat_gap', 2) + T
+        notch_w = self.p.get('fascia_h', 30) + self.p.get('plat_gap', 2) + T
+        if notch_h > H_full: notch_h = H_full - 5
 
         h_low = self.p.get('fianchi_h_low', H_full * 0.6)
         if h_low > H_full: h_low = H_full
+        
         shoulder = self.p.get('fianchi_shoulder', L_base * 0.2)
         min_shoulder = notch_w + 5
         if is_ferro and shoulder < min_shoulder: shoulder = min_shoulder
@@ -115,27 +116,31 @@ class BoxModel:
         r_h = self.p.get('fianchi_r_h', 30)
         r_gap = self.p.get('fianchi_r_gap', 2)
         if r_h > h_low: r_h = h_low - 1
-        avail_w = L_base - 2*shoulder
-        if r_gap * 2 >= avail_w: r_gap = (avail_w / 2) - 5
-
-        p_base_L = (0, 0); p_base_R = (L_base, 0)
-        pts_poly, cuts, creases = [], [], []
         
-        pts_poly.append(p_base_L); curr = p_base_L
+        # FIANCO RISTRETTO DI T
+        x_start = T
+        x_end = L_base - T
+        
+        p_base_L = (x_start, 0)
+        curr = p_base_L
+        pts_poly = [curr]
+        cuts, creases = [], []
         
         # SX
-        path = [(0, -(H_full - notch_h)), (notch_w, -(H_full - notch_h)), (notch_w, -H_full)] if has_platform else [(0, -H_full)]
+        if has_platform:
+            path = [(x_start, -(H_full - notch_h)), (x_start+notch_w, -(H_full - notch_h)), (x_start+notch_w, -H_full)]
+        else:
+            path = [(x_start, -H_full)]
         for pt in path: cuts.append([curr, pt]); curr = pt; pts_poly.append(curr)
 
         # TOP
         p_sh_sx = (shoulder, -H_full); p_u_sx = (shoulder, -h_low)
         p_u_dx = (L_base - shoulder, -h_low); p_sh_dx = (L_base - shoulder, -H_full)
-        target_dx = (L_base - notch_w, -H_full) if has_platform else (L_base, -H_full)
+        target_dx = (x_end - notch_w, -H_full) if has_platform else (x_end, -H_full)
         
         if is_ferro:
             cuts.append([curr, p_sh_sx]); curr = p_sh_sx; pts_poly.append(curr)
             cuts.append([curr, p_u_sx]); curr = p_u_sx; pts_poly.append(curr)
-            
             if has_reinf:
                 p_r_tl = (shoulder + r_gap, -h_low); p_r_bl = (shoulder + r_gap, -(h_low + r_h))
                 p_r_br = (L_base - shoulder - r_gap, -(h_low + r_h)); p_r_tr = (L_base - shoulder - r_gap, -h_low)
@@ -144,15 +149,19 @@ class BoxModel:
                 curr = p_u_dx; pts_poly.extend([p_r_tl, p_r_bl, p_r_br, p_r_tr, p_u_dx])
             else:
                 cuts.append([curr, p_u_dx]); curr = p_u_dx; pts_poly.append(curr)
-            
             cuts.append([curr, p_sh_dx]); curr = p_sh_dx; pts_poly.append(curr)
             cuts.append([curr, target_dx]); curr = target_dx; pts_poly.append(curr)
         else:
             cuts.append([curr, target_dx]); curr = target_dx; pts_poly.append(curr)
             
         # DX
-        path = [(L_base - notch_w, -(H_full - notch_h)), (L_base, -(H_full - notch_h)), (L_base, 0)] if has_platform else [(L_base, 0)]
-        for pt in path: cuts.append([curr, pt]); curr = pt; pts_poly.append(curr)
+        path = [(x_end, -(H_full - notch_h)), (x_end, 0)] if has_platform else [(x_end, 0)]
+        if has_platform:
+            cuts.append([curr, (x_end - notch_w, -(H_full - notch_h))]); curr = (x_end - notch_w, -(H_full - notch_h)); pts_poly.append(curr)
+            cuts.append([curr, (x_end, -(H_full - notch_h))]); curr = (x_end, -(H_full - notch_h)); pts_poly.append(curr)
+            cuts.append([curr, (x_end, 0)]); curr = (x_end, 0); pts_poly.append(curr)
+        else:
+            cuts.append([curr, (x_end, 0)]); curr = (x_end, 0); pts_poly.append(curr)
 
         g_poly = self._rotate_points(pts_poly, orientation)
         g_cuts = [self._rotate_points(seg, orientation) for seg in cuts]
@@ -161,21 +170,27 @@ class BoxModel:
 
     def _get_testata_geometry(self, L_base, H_full, orientation):
         W = self.p['W']
+        T = self.p.get('thickness', 5.0)
         is_ferro = (self.p.get('testate_shape') == 'ferro')
         has_platform = self.p.get('platform_active', False)
         h_low = self.p.get('testate_h_low', H_full * 0.6)
         if h_low > H_full: h_low = H_full
         shoulder = self.p.get('testate_shoulder', W * 0.2)
         if shoulder * 2 > W: shoulder = W / 2 - 1
+        
         has_reinf = is_ferro and self.p.get('testate_r_active', False)
         r_h = self.p.get('testate_r_h', 30)
         r_gap = self.p.get('testate_r_gap', 2)
         if r_h > h_low: r_h = h_low - 1
-        avail_w = W - 2*shoulder
-        if r_gap * 2 >= avail_w: r_gap = (avail_w / 2) - 5
-        curr = (0, 0); pts_poly = [curr]
+        
+        # TESTATA RISTRETTA DI T
+        x_start = T
+        x_end = W - T
+        
+        curr = (x_start, 0); pts_poly = [curr]
         cuts, creases = [], []
-        target = (0, -H_full); creases.append([curr, target]); curr = target; pts_poly.append(curr)
+        target = (x_start, -H_full); creases.append([curr, target]); curr = target; pts_poly.append(curr)
+        
         if is_ferro:
             p_sh_sx = (shoulder, -H_full); p_u_sx = (shoulder, -h_low)
             p_u_dx = (W - shoulder, -h_low); p_sh_dx = (W - shoulder, -H_full)
@@ -191,17 +206,20 @@ class BoxModel:
             else:
                 cuts.append([curr, p_u_dx]); curr = p_u_dx; pts_poly.append(curr)
             cuts.append([curr, p_sh_dx]); curr = p_sh_dx; pts_poly.append(curr)
-            target = (W, -H_full)
+            target = (x_end, -H_full)
             if not has_platform: cuts.append([curr, target])
             curr = target; pts_poly.append(curr)
         else:
-            target = (W, -H_full)
+            target = (x_end, -H_full)
             if not has_platform: cuts.append([curr, target])
             curr = target; pts_poly.append(curr)
-        creases.append([curr, (W, 0)]); curr = (W, 0); pts_poly.append(curr)
+            
+        creases.append([curr, (x_end, 0)]); curr = (x_end, 0); pts_poly.append(curr)
+        
         g_poly = self._rotate_points(pts_poly, orientation)
         g_cuts = [self._rotate_points(seg, orientation) for seg in cuts]
         g_creases = [self._rotate_points(seg, orientation) for seg in creases]
+        
         if has_platform:
             plat_polys, plat_creases, plat_cuts = self._get_platform_assembly(orientation, H_full)
             return [{'coords': g_poly, 'type': 'testate'}] + plat_polys, g_cuts + plat_cuts, g_creases + plat_creases
@@ -215,6 +233,7 @@ class BoxModel:
         is_ferro = (self.p.get('testate_shape') == 'ferro')
         shoulder = self.p.get('testate_shoulder', W * 0.2)
         if shoulder * 2 > W: shoulder = W / 2 - 1
+        
         parts = [] 
         def create_unit(u_s, u_e, left, right):
             v_b, v_t = -H_t, -(H_t + Fascia_H)
@@ -236,11 +255,13 @@ class BoxModel:
             else:
                 f_ct.append([(u_e, v_b), (u_e, v_t)])
             parts.append((f_poly, f_cr, f_ct, 'platform'))
+            
         if is_ferro:
             create_unit(0, shoulder, True, False)
             create_unit(W-shoulder, W, False, True)
         else:
             create_unit(0, W, True, True)
+            
         g_polys, g_cr, g_ct = [], [], []
         for poly, cr, ct, typ in parts:
             g_polys.append({'coords': self._rotate_points(poly, corner), 'type': typ})
@@ -249,7 +270,7 @@ class BoxModel:
         return g_polys, g_cr, g_ct
 
     def _get_flap_geo(self, corner, h_testata, f_len):
-        T = self.p.get('thickness', 3.0)
+        T = self.p.get('thickness', 5.0)
         gap = self.base_gap + T 
         is_ferro = (self.p.get('fianchi_shape') == 'ferro')
         shoulder = self.p.get('fianchi_shoulder', 0)
@@ -263,12 +284,19 @@ class BoxModel:
         u_outer = h_testata - gap_outer
         u_outer_low = u_outer - cut_depth
         if u_outer < u_inner: u_outer = u_inner + 1
+        
+        # --- FIX 2D: Applicare lo spostamento T (avvicinamento) anche qui ---
+        # Poiché la testata si è ristretta di T, il lembo (che parte dalla testata)
+        # deve "rientrare" di T nel senso della larghezza della testata (Y locale).
+        # Sottraiamo T dalla coordinata Y di tutti i punti.
+        
         pts_local = []
         if is_ferro and f_len > shoulder:
-            pts_local = [(u_inner, 0), (u_inner, f_len), (u_outer_low, f_len),
-                         (u_outer_low, shoulder), (u_outer, shoulder), (u_outer, 0)]
+            pts_local = [(u_inner, 0-T), (u_inner, f_len-T), (u_outer_low, f_len-T),
+                         (u_outer_low, shoulder-T), (u_outer, shoulder-T), (u_outer, 0-T)]
         else:
-            pts_local = [(u_inner, 0), (u_inner, f_len), (u_outer, f_len), (u_outer, 0)]
+            pts_local = [(u_inner, 0-T), (u_inner, f_len-T), (u_outer, f_len-T), (u_outer, 0-T)]
+            
         final_pts = self._rotate_points(pts_local, corner)
         cuts = []
         for i in range(len(final_pts)-1): cuts.append([final_pts[i], final_pts[i+1]])
@@ -327,22 +355,14 @@ class Part3D:
     def compute_world_transform(self, parent_tr=None):
         rad = math.radians(self.angle)
         c, s = math.cos(rad), math.sin(rad)
-        
         def transform(v):
             x, y, z = v
-            # Rotazione Locale
             if self.axis == 'x': rx, ry, rz = (x, y*c - z*s, y*s + z*c)
             elif self.axis == 'y': rx, ry, rz = (x*c + z*s, y, -x*s + z*c)
             else: rx, ry, rz = (x*c - y*s, x*s + y*c, z)
-            
-            # Traslazione al Pivot
             px, py, pz = (rx + self.pivot[0], ry + self.pivot[1], rz + self.pivot[2])
-            
-            if parent_tr:
-                return parent_tr((px, py, pz))
-            else:
-                return (px, py, pz)
-        
+            if parent_tr: return parent_tr((px, py, pz))
+            else: return (px, py, pz)
         return transform
 
 class Scene3D:
@@ -354,74 +374,81 @@ class Scene3D:
         L, W = p['L'], p['W']
         H_f, H_t = p['h_fianchi'], p['h_testate']
         F = p['F']
+        T = p.get('thickness', 5.0)
+        
+        # Offset fisico per le parti interne (Z = -T)
+        def off(v_list):
+            return [(x, y, -T) for x, y, z in v_list]
         
         # 1. FONDO (Z=0).
         v_fondo = [(-L/2, -W/2, 0), (-L/2, W/2, 0), (L/2, W/2, 0), (L/2, -W/2, 0)]
         fondo = Part3D("Fondo", v_fondo, None, (0,0,0), 'x', 0)
         self.parts.append(fondo)
         
-        # 2. FIANCATE
-        v_f_top = [(-L/2, -H_f, 0), (-L/2, 0, 0), (L/2, 0, 0), (L/2, -H_f, 0)]
+        # 2. FIANCATE (ESTERNE -> Z=0, Ristrette di T per lato)
+        v_f_top = [(-L/2 + T, -H_f, 0), (-L/2 + T, 0, 0), (L/2 - T, 0, 0), (L/2 - T, -H_f, 0)]
         fianco_top = Part3D("Fianco_Top", v_f_top, fondo, (0, -W/2, 0), 'x', 1) 
         self.parts.append(fianco_top)
         
-        v_f_btm = [(-L/2, 0, 0), (-L/2, H_f, 0), (L/2, H_f, 0), (L/2, 0, 0)]
+        v_f_btm = [(-L/2 + T, 0, 0), (-L/2 + T, H_f, 0), (L/2 - T, H_f, 0), (L/2 - T, 0, 0)]
         fianco_btm = Part3D("Fianco_Btm", v_f_btm, fondo, (0, W/2, 0), 'x', -1) 
         self.parts.append(fianco_btm)
         
-        # 3. TESTATE
-        v_t_left = [(-H_t, -W/2, 0), (-H_t, W/2, 0), (0, W/2, 0), (0, -W/2, 0)]
+        # 3. TESTATE (ESTERNE -> Z=0, Ristrette di T per lato)
+        v_t_left = [(-H_t, -W/2 + T, 0), (-H_t, W/2 - T, 0), (0, W/2 - T, 0), (0, -W/2 + T, 0)]
         testata_sx = Part3D("Testata_L", v_t_left, fondo, (-L/2, 0, 0), 'y', -1) 
         self.parts.append(testata_sx)
         
-        v_t_right = [(0, -W/2, 0), (0, W/2, 0), (H_t, W/2, 0), (H_t, -W/2, 0)]
+        v_t_right = [(0, -W/2 + T, 0), (0, W/2 - T, 0), (H_t, W/2 - T, 0), (H_t, -W/2 + T, 0)]
         testata_dx = Part3D("Testata_R", v_t_right, fondo, (L/2, 0, 0), 'y', 1) 
         self.parts.append(testata_dx)
         
-        # 4. LEMBI (Figli Testate)
+        # 4. LEMBI (INTERNI -> off(-T))
+        # Spostati: pivot segue la testata (-W/2 + T)
         v_l_tl = [(-H_t, -F, 0), (-H_t, 0, 0), (0, 0, 0), (0, -F, 0)]
-        lembo_tl = Part3D("Lembo_TL", v_l_tl, testata_sx, (0, -W/2, 0), 'x', 1)
+        lembo_tl = Part3D("Lembo_TL", off(v_l_tl), testata_sx, (0, -W/2 + T, 0), 'x', 1)
         self.parts.append(lembo_tl)
         
         v_l_bl = [(-H_t, 0, 0), (-H_t, F, 0), (0, F, 0), (0, 0, 0)]
-        lembo_bl = Part3D("Lembo_BL", v_l_bl, testata_sx, (0, W/2, 0), 'x', -1)
+        lembo_bl = Part3D("Lembo_BL", off(v_l_bl), testata_sx, (0, W/2 - T, 0), 'x', -1)
         self.parts.append(lembo_bl)
         
         v_l_tr = [(0, -F, 0), (0, 0, 0), (H_t, 0, 0), (H_t, -F, 0)]
-        lembo_tr = Part3D("Lembo_TR", v_l_tr, testata_dx, (0, -W/2, 0), 'x', 1)
+        lembo_tr = Part3D("Lembo_TR", off(v_l_tr), testata_dx, (0, -W/2 + T, 0), 'x', 1)
         self.parts.append(lembo_tr)
 
         v_l_br = [(0, 0, 0), (0, F, 0), (H_t, F, 0), (H_t, 0, 0)]
-        lembo_br = Part3D("Lembo_BR", v_l_br, testata_dx, (0, W/2, 0), 'x', -1)
+        lembo_br = Part3D("Lembo_BR", off(v_l_br), testata_dx, (0, W/2 - T, 0), 'x', -1)
         self.parts.append(lembo_br)
         
-        # 5. PLATFORM (Figli Testate)
+        # 5. PLATFORM (INTERNI -> off(-T))
         if p.get('platform_active'):
             fh = p.get('fascia_h', 30)
             pl_w = p.get('plat_flap_w', 30)
             
+            # La fascia è larga W completa, quindi sporge dalla testata stretta
             v_fascia_l = [(-fh, -W/2, 0), (-fh, W/2, 0), (0, W/2, 0), (0, -W/2, 0)]
-            fascia_l = Part3D("Fascia_L", v_fascia_l, testata_sx, (-H_t, 0, 0), 'y', -1)
+            fascia_l = Part3D("Fascia_L", off(v_fascia_l), testata_sx, (-H_t, 0, 0), 'y', -1)
             self.parts.append(fascia_l)
             
             v_pfl_top = [(-fh, -pl_w, 0), (-fh, 0, 0), (0, 0, 0), (0, -pl_w, 0)]
-            pfl_top = Part3D("PFlap_L_Top", v_pfl_top, fascia_l, (0, -W/2, 0), 'x', 1)
+            pfl_top = Part3D("PFlap_L_Top", off(v_pfl_top), fascia_l, (0, -W/2, 0), 'x', 1)
             self.parts.append(pfl_top)
             
             v_pfl_btm = [(-fh, 0, 0), (-fh, pl_w, 0), (0, pl_w, 0), (0, 0, 0)]
-            pfl_btm = Part3D("PFlap_L_Btm", v_pfl_btm, fascia_l, (0, W/2, 0), 'x', -1)
+            pfl_btm = Part3D("PFlap_L_Btm", off(v_pfl_btm), fascia_l, (0, W/2, 0), 'x', -1)
             self.parts.append(pfl_btm)
             
             v_fascia_r = [(0, -W/2, 0), (0, W/2, 0), (fh, W/2, 0), (fh, -W/2, 0)]
-            fascia_r = Part3D("Fascia_R", v_fascia_r, testata_dx, (H_t, 0, 0), 'y', 1)
+            fascia_r = Part3D("Fascia_R", off(v_fascia_r), testata_dx, (H_t, 0, 0), 'y', 1)
             self.parts.append(fascia_r)
             
             v_pfr_top = [(0, -pl_w, 0), (0, 0, 0), (fh, 0, 0), (fh, -pl_w, 0)]
-            pfr_top = Part3D("PFlap_R_Top", v_pfr_top, fascia_r, (0, -W/2, 0), 'x', 1)
+            pfr_top = Part3D("PFlap_R_Top", off(v_pfr_top), fascia_r, (0, -W/2, 0), 'x', 1)
             self.parts.append(pfr_top)
             
             v_pfr_btm = [(0, 0, 0), (0, pl_w, 0), (fh, pl_w, 0), (fh, 0, 0)]
-            pfr_btm = Part3D("PFlap_R_Btm", v_pfr_btm, fascia_r, (0, W/2, 0), 'x', -1)
+            pfr_btm = Part3D("PFlap_R_Btm", off(v_pfr_btm), fascia_r, (0, W/2, 0), 'x', -1)
             self.parts.append(pfr_btm)
 
     def get_world_polygons(self):
@@ -476,10 +503,7 @@ class Viewer3D(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.fillRect(self.rect(), self.bg_color)
-        
         w, h = self.width(), self.height()
-        
-        # 1. Calcolo Matrice Camera
         rad_p = math.radians(self.cam_pitch)
         rad_y = math.radians(self.cam_yaw)
         cp, sp = math.cos(rad_p), math.sin(rad_p)
@@ -487,39 +511,36 @@ class Viewer3D(QWidget):
         
         def world_to_view(v):
             x, y, z = v
-            # Yaw 
             rx = x*cy - y*sy
             ry = x*sy + y*cy
-            # Pitch
             y_view = ry*cp - z*sp
             z_view = ry*sp + z*cp
             return (rx, y_view, z_view)
 
-        # 2. Ottieni poligoni
         world_polys = self.scene.get_world_polygons()
-        
-        # 3. Trasforma in View Space e calcola Z-Depth
         render_list = []
         for verts, name in world_polys:
             view_verts = [world_to_view(v) for v in verts]
-            
             if view_verts:
-                # Ripristinato Ordinamento per Media (Più stabile)
+                # Ripristinato ordinamento per Z medio (stabile)
                 z_sort_key = sum(v[2] for v in view_verts) / len(view_verts)
             else:
                 z_sort_key = 0
             
-            # Bias per i lembi interni (disegna prima)
             is_flap = ("Lembo" in name or "PFlap" in name or "Fascia" in name)
+            
+            # FIX INTERSEZIONI VISIVE
+            # Le parti interne (con Z = -T) sono fisicamente dentro.
+            # Per il Painter's Algorithm (reverse=True -> Draw First = Background),
+            # Vogliamo che i Lembi siano disegnati PRIMA delle pareti esterne per essere coperti.
+            # Quindi devono avere un Sort Key (Z) MOLTO PIÙ ALTO (essere considerati "Sfondo").
             if is_flap:
-                z_sort_key += 0.5 
+                z_sort_key += 2000.0 
 
             render_list.append((z_sort_key, view_verts, is_flap))
             
-        # 4. Ordina per profondità (Lontano -> Vicino)
         render_list.sort(key=lambda x: x[0], reverse=True)
         
-        # 5. Proiezione e Disegno
         for z_depth, v_verts, is_flap in render_list:
             pts_2d = []
             for vx, vy, vz in v_verts:
@@ -528,43 +549,24 @@ class Viewer3D(QWidget):
                 sy = -vy * factor * self.scale + h/2
                 pts_2d.append(QPointF(sx, sy))
             
-            # Shrink per pulizia bordi (1%)
-            if is_flap and len(pts_2d) > 0:
-                center = QPointF(0,0)
-                for p in pts_2d: center += p
-                center /= len(pts_2d)
-                
-                shrink_factor = 0.99
-                new_pts = []
-                for p in pts_2d:
-                    vec = p - center
-                    new_pts.append(center + vec * shrink_factor)
-                pts_2d = new_pts
-
-            # Backface Culling
             area = 0.0
             for i in range(len(pts_2d)):
                 p1 = pts_2d[i]
                 p2 = pts_2d[(i+1) % len(pts_2d)]
                 area += (p2.x() - p1.x()) * (p2.y() + p1.y())
-            
             is_front = area < 0 
             
-            # Colori Invertiti: Front=Marrone (Interno), Back=Bianco (Esterno)
             if is_front:
                 base_c = THEME["brown_alpha"] if self.transparency_mode else THEME["brown_opaque"]
             else:
                 base_c = THEME["white_alpha"] if self.transparency_mode else THEME["white_opaque"]
             
-            # Shading
             shade = max(0, min(40, int(z_depth * 0.1 + 10)))
             r, g, b, a = base_c.red(), base_c.green(), base_c.blue(), base_c.alpha()
             final_c = QColor(max(0, r - shade), max(0, g - shade), max(0, b - shade), a)
             
             painter.setBrush(final_c)
-            # Penna sottile per lembi interni
-            pen_width = 1.0 if is_flap else 2.0
-            painter.setPen(QPen(Qt.black, pen_width))
+            painter.setPen(QPen(Qt.black, 1.5))
             painter.drawPolygon(QPolygonF(pts_2d))
 
     def mousePressEvent(self, e):
@@ -615,12 +617,10 @@ class DrawingArea2D(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.fillRect(self.rect(), self.bg_color)
-        
         cw, ch = self.width(), self.height()
         if cw < 50: return
 
         polygons, cut_lines, crease_lines = self.model_data
-        
         tot_w = self.params_L + self.params_HT*2 + 300
         tot_h = self.params_W + self.params_HF*2 + self.params_F*2 + 200
         if tot_w == 0: tot_w = 1
@@ -706,7 +706,6 @@ class PackagingApp(QMainWindow):
         self.inputs = {}
         self.build_ui()
         
-        # Animazione
         self.step_idx = 0
         self.anim_progress = 0.0
         self.timer = QTimer()
@@ -715,9 +714,7 @@ class PackagingApp(QMainWindow):
         self.target_key = ''
         self.is_animating = False
         
-        # NUOVA GESTIONE ANIMAZIONE UNICA
         self.is_combined_anim = False
-        
         self.refresh()
 
     def build_ui(self):
@@ -726,7 +723,6 @@ class PackagingApp(QMainWindow):
         header.setAlignment(Qt.AlignCenter)
         self.panel_layout.insertWidget(0, header) 
 
-        # TUTTI I PANNELLI CHIUSI
         sec = CollapsibleSection("1. Fondo", self.scroll_content, expanded=False)
         self.panel_layout.addWidget(sec)
         self.add_entry(sec, "Lunghezza (L)", "L", "400")
@@ -788,14 +784,12 @@ class PackagingApp(QMainWindow):
         self.panel_layout.addWidget(sec)
         self.add_entry(sec, "Lunghezza", "F", "120")
         
-        # PLAY BUTTON (SINGLE STEP)
         self.btn_play = QPushButton("▶ STEP-BY-STEP (1/5)")
         self.btn_play.setStyleSheet(f"background-color: {THEME['line_crease']}; color: white; padding: 15px; font-weight: bold; border-radius: 5px;")
         self.btn_play.clicked.connect(self.next_animation_step)
         self.panel_layout.addSpacing(20)
         self.panel_layout.addWidget(self.btn_play)
         
-        # NUOVO PULSANTE ANIMAZIONE COMPLETA
         self.btn_anim_all = QPushButton("▶ ANIMAZIONE COMPLETA")
         self.btn_anim_all.setStyleSheet(f"background-color: #FF9800; color: black; padding: 15px; font-weight: bold; border-radius: 5px; margin-top: 10px;")
         self.btn_anim_all.clicked.connect(self.start_combined_animation)
@@ -871,16 +865,13 @@ class PackagingApp(QMainWindow):
         if self.is_animating: return
         self.is_combined_anim = False
         self.tabs.setCurrentIndex(1)
-        
         steps = ['lembi', 'testate', 'fianchi', 'fasce', 'ext']
-        
         if self.step_idx >= len(steps):
             self.step_idx = 0
             self.anim_angles = {k:0 for k in self.anim_angles}
             self.refresh()
             self.btn_play.setText(f"▶ STEP-BY-STEP (1/{len(steps)})")
             return
-
         self.target_key = steps[self.step_idx]
         self.anim_progress = 0.0
         self.is_animating = True
@@ -903,17 +894,8 @@ class PackagingApp(QMainWindow):
 
     def update_frame(self):
         if self.is_combined_anim:
-            # ANIMAZIONE LENTA: Incremento 0.01 per frame (500% più lento di prima)
             self.anim_progress += 0.01 
-            
-            # --- TIMELINE ---
-            # 0.0 -> 1.0: Lembi & Testate
-            # 0.5 -> 1.5: Fianchi (parte al 50% dei precedenti)
-            # 1.5 -> 2.5: Fasce (dopo fianchi)
-            # 2.5 -> 3.5: Ext (dopo fasce)
-            
             t = self.anim_progress
-            
             self.anim_angles['lembi'] = self.get_interp_angle(t, 0.0, 1.0)
             self.anim_angles['testate'] = self.get_interp_angle(t, 0.0, 1.0)
             self.anim_angles['fianchi'] = self.get_interp_angle(t, 0.5, 1.5)
@@ -928,14 +910,12 @@ class PackagingApp(QMainWindow):
             self.viewer_3d.update_angles(self.anim_angles)
             return
 
-        # Animazione normale step-by-step (Veloce: 0.05)
         self.anim_progress += 0.05
         if self.anim_progress >= 1.0:
             self.anim_progress = 1.0
             self.timer.stop()
             self.is_animating = False
             self.step_idx += 1
-            
             steps = ['lembi', 'testate', 'fianchi', 'fasce', 'ext']
             if self.step_idx >= len(steps):
                 self.btn_play.setText("↺ RESET ANIMAZIONE")
