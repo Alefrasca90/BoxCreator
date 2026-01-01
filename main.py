@@ -17,11 +17,12 @@ THEME = {
     # 2D
     "cardboard": "#E0C0A0",
     
-    # 3D: Brown = Interno, White = Esterno
-    "brown_opaque": QColor(190, 150, 110, 255),
+    # 3D COLORS
+    # Marrone = Interno (Frontale), Bianco = Esterno (Retro)
+    "brown_opaque": QColor(139, 100, 60, 255),
+    "brown_alpha":  QColor(139, 100, 60, 200),
     "white_opaque": QColor(240, 240, 240, 255),
-    "brown_alpha":  QColor(190, 150, 110, 180),
-    "white_alpha":  QColor(240, 240, 240, 180),
+    "white_alpha":  QColor(240, 240, 240, 200),
     
     "highlight": "#81D4FA",
     "line_cut": "#000000",
@@ -478,7 +479,7 @@ class Viewer3D(QWidget):
         
         w, h = self.width(), self.height()
         
-        # 1. Calcolo Matrice Camera (View Rotation)
+        # 1. Calcolo Matrice Camera
         rad_p = math.radians(self.cam_pitch)
         rad_y = math.radians(self.cam_yaw)
         cp, sp = math.cos(rad_p), math.sin(rad_p)
@@ -494,7 +495,7 @@ class Viewer3D(QWidget):
             z_view = ry*sp + z*cp
             return (rx, y_view, z_view)
 
-        # 2. Ottieni poligoni world space
+        # 2. Ottieni poligoni
         world_polys = self.scene.get_world_polygons()
         
         # 3. Trasforma in View Space e calcola Z-Depth
@@ -503,26 +504,23 @@ class Viewer3D(QWidget):
             view_verts = [world_to_view(v) for v in verts]
             
             if view_verts:
-                z_depth = sum(v[2] for v in view_verts) / len(view_verts)
+                # Ripristinato Ordinamento per Media (Più stabile)
+                z_sort_key = sum(v[2] for v in view_verts) / len(view_verts)
             else:
-                z_depth = 0
+                z_sort_key = 0
             
-            # --- FIX COMPENETRAZIONE LEMBI ---
-            # Aggiungiamo un bias positivo alla profondità Z per le parti interne (Lembi).
-            # Nel Painter's Algorithm (reverse=True), Z più grande viene disegnato PRIMA.
-            # Quindi aumentando Z, li spingiamo "in fondo" alla lista di disegno,
-            # assicurando che vengano coperti dalle facce esterne (Fianchi/Testate)
-            # che hanno Z minore (più vicine alla camera).
-            if "Lembo" in name or "PFlap" in name or "Fascia" in name:
-                z_depth += 0.5 
+            # Bias per i lembi interni (disegna prima)
+            is_flap = ("Lembo" in name or "PFlap" in name or "Fascia" in name)
+            if is_flap:
+                z_sort_key += 0.5 
 
-            render_list.append((z_depth, view_verts))
+            render_list.append((z_sort_key, view_verts, is_flap))
             
         # 4. Ordina per profondità (Lontano -> Vicino)
         render_list.sort(key=lambda x: x[0], reverse=True)
         
         # 5. Proiezione e Disegno
-        for z_depth, v_verts in render_list:
+        for z_depth, v_verts, is_flap in render_list:
             pts_2d = []
             for vx, vy, vz in v_verts:
                 factor = 1000 / (1000 + vz) if (1000 + vz) != 0 else 1
@@ -530,28 +528,43 @@ class Viewer3D(QWidget):
                 sy = -vy * factor * self.scale + h/2
                 pts_2d.append(QPointF(sx, sy))
             
+            # Shrink per pulizia bordi (1%)
+            if is_flap and len(pts_2d) > 0:
+                center = QPointF(0,0)
+                for p in pts_2d: center += p
+                center /= len(pts_2d)
+                
+                shrink_factor = 0.99
+                new_pts = []
+                for p in pts_2d:
+                    vec = p - center
+                    new_pts.append(center + vec * shrink_factor)
+                pts_2d = new_pts
+
+            # Backface Culling
             area = 0.0
             for i in range(len(pts_2d)):
                 p1 = pts_2d[i]
                 p2 = pts_2d[(i+1) % len(pts_2d)]
                 area += (p2.x() - p1.x()) * (p2.y() + p1.y())
             
-            is_front = area < 0
+            is_front = area < 0 
             
-            # --- INVERSIONE COLORI RICHIESTA ---
-            # is_front (Interno) -> Marrone
-            # !is_front (Esterno) -> Bianco
+            # Colori Invertiti: Front=Marrone (Interno), Back=Bianco (Esterno)
             if is_front:
                 base_c = THEME["brown_alpha"] if self.transparency_mode else THEME["brown_opaque"]
             else:
                 base_c = THEME["white_alpha"] if self.transparency_mode else THEME["white_opaque"]
             
-            shade = max(0, min(40, int(z_depth * 0.15 + 15)))
+            # Shading
+            shade = max(0, min(40, int(z_depth * 0.1 + 10)))
             r, g, b, a = base_c.red(), base_c.green(), base_c.blue(), base_c.alpha()
             final_c = QColor(max(0, r - shade), max(0, g - shade), max(0, b - shade), a)
             
             painter.setBrush(final_c)
-            painter.setPen(QPen(Qt.black, 2.0))
+            # Penna sottile per lembi interni
+            pen_width = 1.0 if is_flap else 2.0
+            painter.setPen(QPen(Qt.black, pen_width))
             painter.drawPolygon(QPolygonF(pts_2d))
 
     def mousePressEvent(self, e):
@@ -702,6 +715,9 @@ class PackagingApp(QMainWindow):
         self.target_key = ''
         self.is_animating = False
         
+        # NUOVA GESTIONE ANIMAZIONE UNICA
+        self.is_combined_anim = False
+        
         self.refresh()
 
     def build_ui(self):
@@ -772,12 +788,18 @@ class PackagingApp(QMainWindow):
         self.panel_layout.addWidget(sec)
         self.add_entry(sec, "Lunghezza", "F", "120")
         
-        # PLAY BUTTON
-        self.btn_play = QPushButton("▶ ESEGUI PROSSIMA PIEGA (1/5)")
+        # PLAY BUTTON (SINGLE STEP)
+        self.btn_play = QPushButton("▶ STEP-BY-STEP (1/5)")
         self.btn_play.setStyleSheet(f"background-color: {THEME['line_crease']}; color: white; padding: 15px; font-weight: bold; border-radius: 5px;")
         self.btn_play.clicked.connect(self.next_animation_step)
         self.panel_layout.addSpacing(20)
         self.panel_layout.addWidget(self.btn_play)
+        
+        # NUOVO PULSANTE ANIMAZIONE COMPLETA
+        self.btn_anim_all = QPushButton("▶ ANIMAZIONE COMPLETA")
+        self.btn_anim_all.setStyleSheet(f"background-color: #FF9800; color: black; padding: 15px; font-weight: bold; border-radius: 5px; margin-top: 10px;")
+        self.btn_anim_all.clicked.connect(self.start_combined_animation)
+        self.panel_layout.addWidget(self.btn_anim_all)
         
         self.panel_layout.addStretch()
 
@@ -847,6 +869,7 @@ class PackagingApp(QMainWindow):
 
     def next_animation_step(self):
         if self.is_animating: return
+        self.is_combined_anim = False
         self.tabs.setCurrentIndex(1)
         
         steps = ['lembi', 'testate', 'fianchi', 'fasce', 'ext']
@@ -855,7 +878,7 @@ class PackagingApp(QMainWindow):
             self.step_idx = 0
             self.anim_angles = {k:0 for k in self.anim_angles}
             self.refresh()
-            self.btn_play.setText(f"▶ ESEGUI PROSSIMA PIEGA (1/{len(steps)})")
+            self.btn_play.setText(f"▶ STEP-BY-STEP (1/{len(steps)})")
             return
 
         self.target_key = steps[self.step_idx]
@@ -863,7 +886,49 @@ class PackagingApp(QMainWindow):
         self.is_animating = True
         self.timer.start(20) 
 
+    def start_combined_animation(self):
+        if self.is_animating: return
+        self.tabs.setCurrentIndex(1)
+        self.anim_angles = {k:0 for k in self.anim_angles}
+        self.is_combined_anim = True
+        self.anim_progress = 0.0
+        self.is_animating = True
+        self.timer.start(20)
+
+    def get_interp_angle(self, t, start_t, end_t):
+        if t < start_t: return 0.0
+        if t > end_t: return 90.0
+        ratio = (t - start_t) / (end_t - start_t)
+        return ratio * 90.0
+
     def update_frame(self):
+        if self.is_combined_anim:
+            # ANIMAZIONE LENTA: Incremento 0.01 per frame (500% più lento di prima)
+            self.anim_progress += 0.01 
+            
+            # --- TIMELINE ---
+            # 0.0 -> 1.0: Lembi & Testate
+            # 0.5 -> 1.5: Fianchi (parte al 50% dei precedenti)
+            # 1.5 -> 2.5: Fasce (dopo fianchi)
+            # 2.5 -> 3.5: Ext (dopo fasce)
+            
+            t = self.anim_progress
+            
+            self.anim_angles['lembi'] = self.get_interp_angle(t, 0.0, 1.0)
+            self.anim_angles['testate'] = self.get_interp_angle(t, 0.0, 1.0)
+            self.anim_angles['fianchi'] = self.get_interp_angle(t, 0.5, 1.5)
+            self.anim_angles['fasce'] = self.get_interp_angle(t, 1.5, 2.5)
+            self.anim_angles['ext'] = self.get_interp_angle(t, 2.5, 3.5)
+            
+            if self.anim_progress >= 3.5:
+                self.timer.stop()
+                self.is_animating = False
+                self.is_combined_anim = False
+                
+            self.viewer_3d.update_angles(self.anim_angles)
+            return
+
+        # Animazione normale step-by-step (Veloce: 0.05)
         self.anim_progress += 0.05
         if self.anim_progress >= 1.0:
             self.anim_progress = 1.0
@@ -875,7 +940,7 @@ class PackagingApp(QMainWindow):
             if self.step_idx >= len(steps):
                 self.btn_play.setText("↺ RESET ANIMAZIONE")
             else:
-                self.btn_play.setText(f"▶ ESEGUI PROSSIMA PIEGA ({self.step_idx + 1}/{len(steps)})")
+                self.btn_play.setText(f"▶ STEP-BY-STEP ({self.step_idx + 1}/{len(steps)})")
         
         self.anim_angles[self.target_key] = self.anim_progress * 90
         self.viewer_3d.update_angles(self.anim_angles)
