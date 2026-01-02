@@ -42,7 +42,6 @@ class Viewer3D(QOpenGLWidget):
         glLightfv(GL_LIGHT0, GL_AMBIENT, [0.5, 0.5, 0.5, 1.0])
         glLightfv(GL_LIGHT0, GL_DIFFUSE, [0.7, 0.7, 0.7, 1.0])
 
-        # Setup Tessellator per poligoni concavi
         self.tess = gluNewTess()
         gluTessCallback(self.tess, GLU_TESS_BEGIN, glBegin)
         gluTessCallback(self.tess, GLU_TESS_VERTEX, glVertex3dv)
@@ -66,38 +65,43 @@ class Viewer3D(QOpenGLWidget):
 
         faces = self.manager.get_3d_faces()
         
-        # 1. RENDERING FACCE PIENE (Con Tessellatore per concavi)
         glEnable(GL_POLYGON_OFFSET_FILL)
         
         for face in faces:
             is_reinf = "Reinf" in face.get('name', '')
-            col = THEME["gl_brown"] if face.get('col') == 'cardboard' else THEME["gl_white"]
+            # Selezione colori
+            c_type = face.get('col', 'cardboard')
+            
+            if c_type == 'white': 
+                col = THEME["gl_white"] # Hinge Skin
+            elif c_type == 'cardboard': 
+                col = THEME["gl_brown"]
+            else: 
+                col = THEME["gl_white"] # Fallback
+
             if face['type'] == 'side': col = THEME["gl_brown_dark"]
             
-            # Offset per evitare Z-Fighting
             if is_reinf: glPolygonOffset(-1.0, -1.0)
             else: glPolygonOffset(1.0, 1.0)
 
             alpha = 0.6 if self.transparency_mode else 1.0
             glColor4f(col[0], col[1], col[2], alpha)
             
-            # Usiamo gluTess per Front e Back che possono essere concavi
+            # Rendering: Tessellator per facce grandi, Polygon per strisce piccole
             if face['type'] in ['front', 'back']:
                 gluTessBeginPolygon(self.tess, None)
                 gluTessBeginContour(self.tess)
-                for v in face['verts']:
-                    gluTessVertex(self.tess, v, v)
+                for v in face['verts']: gluTessVertex(self.tess, v, v)
                 gluTessEndContour(self.tess)
                 gluTessEndPolygon(self.tess)
             else:
-                # Per i lati (sempre convessi) usiamo standard GL_POLYGON
                 glBegin(GL_POLYGON)
                 for v in face['verts']: glVertex3f(v[0], v[1], v[2])
                 glEnd()
         
         glDisable(GL_POLYGON_OFFSET_FILL)
 
-        # 2. RENDERING LINEE (Bordi Tecnici)
+        # Rendering Bordi Tecnici
         glDisable(GL_LIGHTING)
         glLineWidth(1.5)
         glColor4f(0, 0, 0, 1.0)
@@ -105,7 +109,9 @@ class Viewer3D(QOpenGLWidget):
         glPolygonOffset(-2.0, -2.0)
 
         for face in faces:
-            # Qui usiamo GL_LINE_LOOP che segue semplicemente i punti (perfetto per il contorno)
+            # Le facce 'hinge' non hanno bisogno di outline pesante, le saltiamo o le facciamo sottili
+            if face['type'] == 'hinge': continue
+
             glBegin(GL_LINE_LOOP)
             for v in face['verts']: glVertex3f(v[0], v[1], v[2])
             glEnd()
