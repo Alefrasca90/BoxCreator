@@ -14,7 +14,7 @@ from geometry_oop import BoxManager
 class PackagingApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Packaging CAD Pro (OOP Final)")
+        self.setWindowTitle("Packaging CAD Pro (Final Sequence)")
         self.resize(1400, 950)
         self.setStyleSheet(f"QMainWindow {{ background-color: {THEME['bg_ui']}; }}")
 
@@ -25,7 +25,6 @@ class PackagingApp(QMainWindow):
         layout = QHBoxLayout(main_w)
         layout.setContentsMargins(0,0,0,0)
 
-        # Pannello Sinistro
         scroll = QScrollArea()
         scroll.setFixedWidth(400)
         scroll.setWidgetResizable(True)
@@ -36,7 +35,6 @@ class PackagingApp(QMainWindow):
         scroll.setWidget(self.scroll_content)
         layout.addWidget(scroll)
 
-        # Tabs 2D/3D
         self.tabs = QTabWidget()
         self.canvas_2d = DrawingArea2D()
         self.viewer_3d = Viewer3D()
@@ -44,7 +42,6 @@ class PackagingApp(QMainWindow):
         self.tabs.addTab(self.viewer_3d, "Animazione 3D")
         layout.addWidget(self.tabs)
         
-        # Checkbox Trasparenza
         self.chk_transp = QCheckBox("Trasparenza 3D")
         self.chk_transp.setStyleSheet(f"color: {THEME['fg_text']}; margin-bottom: 10px;")
         self.chk_transp.toggled.connect(self.viewer_3d.set_transparency)
@@ -53,7 +50,7 @@ class PackagingApp(QMainWindow):
         self.inputs = {}
         self.build_ui()
         
-        # Variabili animazione
+        # Setup Animazione
         self.anim_vars = {'idx': 0, 'prog': 0.0, 'angles': {}, 'key': '', 'active': False, 'comb': False}
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
@@ -66,45 +63,31 @@ class PackagingApp(QMainWindow):
         lbl.setAlignment(Qt.AlignCenter)
         self.panel_layout.insertWidget(0, lbl)
 
-        # 1. Fondo
         self.add_sec("1. Fondo", [("Lunghezza", "L", 400), ("Larghezza", "W", 300), ("Spessore", "thickness", 5)])
         
-        # 2. Fianchi
         s2 = self.add_sec("2. Fianchi", [("Altezza", "h_fianchi", 100)])
         self.cb_f_shape = QCheckBox("Ferro di Cavallo"); self.cb_f_shape.setChecked(True)
         self.cb_f_shape.toggled.connect(self.refresh); s2.add_widget(self.cb_f_shape)
-        
-        # Parametri ferro/raddoppio
-        # ORA SI USA 'fianchi_cutout_w' (Largh. Scasso) INVECE DI SPALLA
         self.add_inps(s2, [("H Min", "fianchi_h_low", 60), ("Largh. Scasso", "fianchi_cutout_w", 220)])
-        
         self.cb_f_reinf = QCheckBox("Raddoppio"); self.cb_f_reinf.setChecked(True)
         self.cb_f_reinf.toggled.connect(self.refresh); s2.add_widget(self.cb_f_reinf)
         self.add_inps(s2, [("H Raddoppio", "fianchi_r_h", 40)])
         
-        # 3. Testate
         s3 = self.add_sec("3. Testate", [("Altezza", "h_testate", 100)])
         self.cb_t_shape = QCheckBox("Ferro di Cavallo"); self.cb_t_shape.setChecked(True)
         self.cb_t_shape.toggled.connect(self.refresh); s3.add_widget(self.cb_t_shape)
-        
-        # Parametri ferro/raddoppio
-        # ORA SI USA 'testate_cutout_w' (Largh. Scasso) INVECE DI SPALLA
         self.add_inps(s3, [("H Min", "testate_h_low", 60), ("Largh. Scasso", "testate_cutout_w", 180)])
-        
         self.cb_t_reinf = QCheckBox("Raddoppio"); self.cb_t_reinf.setChecked(True)
         self.cb_t_reinf.toggled.connect(self.refresh); s3.add_widget(self.cb_t_reinf)
         self.add_inps(s3, [("H Raddoppio", "testate_r_h", 30)])
         
-        # 4. Platform
         s4 = self.add_sec("4. Platform", [])
         self.cb_plat = QCheckBox("Attiva"); self.cb_plat.setChecked(True)
         self.cb_plat.toggled.connect(self.refresh); s4.add_widget(self.cb_plat)
         self.add_inps(s4, [("H Fascia", "fascia_h", 35), ("W Lembo", "plat_flap_w", 40)])
         
-        # 5. Lembi
         self.add_sec("5. Lembi", [("Lunghezza", "F", 120)])
         
-        # Bottoni
         btn_step = QPushButton("▶ STEP"); btn_step.clicked.connect(self.anim_step)
         btn_step.setStyleSheet(f"background: {THEME['line_crease']}; padding: 10px;")
         self.panel_layout.addWidget(btn_step)
@@ -136,10 +119,8 @@ class PackagingApp(QMainWindow):
         p = {k: self.get_val(k) for k in self.inputs}
         p['fianchi_shape'] = 'ferro' if self.cb_f_shape.isChecked() else 'rect'
         p['fianchi_r_active'] = self.cb_f_reinf.isChecked() 
-        
         p['testate_shape'] = 'ferro' if self.cb_t_shape.isChecked() else 'rect'
         p['testate_r_active'] = self.cb_t_reinf.isChecked() 
-        
         p['platform_active'] = self.cb_plat.isChecked()
         
         try:
@@ -159,7 +140,8 @@ class PackagingApp(QMainWindow):
     def anim_step(self):
         if self.anim_vars['active']: return
         self.tabs.setCurrentIndex(1)
-        st = ['lembi', 'testate', 'fianchi', 'fasce', 'ext']
+        # Sequenza step-by-step
+        st = ['lembi', 'testate', 'fianchi', 'fasce', 'ext', 'reinf']
         if self.anim_vars['idx'] >= len(st):
             self.anim_vars['idx'] = 0
             self.anim_vars['angles'] = {}
@@ -180,18 +162,25 @@ class PackagingApp(QMainWindow):
             v['prog'] += 0.02
             t = v['prog']
             ang = v['angles']
-            def lerp(t, s, e): return 0 if t<s else (90 if t>e else (t-s)/(e-s)*90)
-            ang['lembi'] = lerp(t, 0, 1)
-            ang['testate'] = lerp(t, 0, 1)
-            ang['fianchi'] = lerp(t, 0.5, 1.5)
-            ang['fasce'] = lerp(t, 1.5, 2.5)
-            ang['ext'] = lerp(t, 2.5, 3.5)
-            if t >= 3.5: self.timer.stop(); v['active'] = False
+            def lerp(t, s, e, max_a=90): return 0 if t<s else (max_a if t>e else (t-s)/(e-s)*max_a)
+            
+            # --- SEQUENZA TEMPORALE RIGOROSA ---
+            ang['lembi']   = lerp(t, 0.0, 1.0) # 1. Lembi incollaggio
+            ang['testate'] = lerp(t, 1.0, 2.0) # 2. Testate
+            ang['fianchi'] = lerp(t, 2.0, 3.0) # 3. Fianchi
+            ang['fasce']   = lerp(t, 3.0, 4.0) # 4. Fasce Platform
+            ang['ext']     = lerp(t, 4.0, 5.0) # 5. Lembi Platform
+            ang['reinf']   = lerp(t, 5.0, 6.0, 180) # 6. Raddoppi (180°)
+            
+            if t >= 6.0: self.timer.stop(); v['active'] = False
         else:
             v['prog'] += 0.05
             if v['prog'] >= 1.0:
                 v['prog'] = 1.0; self.timer.stop(); v['active'] = False; v['idx'] += 1
-            v['angles'][v['key']] = v['prog'] * 90
+            
+            target = 180 if v['key'] == 'reinf' else 90
+            v['angles'][v['key']] = v['prog'] * target
+            
         self.viewer_3d.update_angles(v['angles'])
 
 if __name__ == "__main__":
