@@ -11,7 +11,8 @@ THEME = {
     "line_crease": "#00C853",
     
     # Colori 3D OpenGL (RGBA float)
-    "gl_white": (0.95, 0.95, 0.95, 1.0),
+    # Bianco reso ancora più grigio (0.75) per evitare che "bruci" con le luci forti
+    "gl_white": (0.75, 0.75, 0.75, 1.0),
     "gl_brown": (0.63, 0.51, 0.39, 1.0),
     "gl_brown_dark": (0.35, 0.25, 0.18, 1.0),
     "gl_edge": (0.0, 0.0, 0.0, 1.0),
