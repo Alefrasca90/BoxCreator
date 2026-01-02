@@ -8,8 +8,7 @@ class BoxComponent:
         self.thickness = thickness
         self.parent = parent
         self.children = []
-        self.label = label # <--- Useremo questo per l'animazione, è infallibile
-        
+        self.label = label 
         self.polygon = [] 
         
         self.fold_angle = 0.0
@@ -27,10 +26,8 @@ class BoxComponent:
         self.children.append(child)
         gw, gh = self.width, self.height
         
-        # --- LOGICA POSIZIONAMENTO ---
-        
+        # Logica di posizionamento standard
         if self.name == "Fondo":
-            # Fondo (Z+ UP)
             if edge == 'top':
                 child.pivot_3d = (0, -gh/2, 0); child.pre_rot_z = 0 
                 child.fold_axis = 'x'; child.fold_multiplier = -1 
@@ -47,46 +44,29 @@ class BoxComponent:
                 child.pivot_3d = (gw/2, 0, 0); child.pre_rot_z = 90 
                 child.fold_axis = 'y'; child.fold_multiplier = -1 
                 child.layout_pos = (gw/2, 0); child.layout_rot = 90 
-
         else:
-            # Figli (Lembi, Fasce, Raddoppi)
-            # Devono piegare verso l'interno (Marrone)
-            
             if edge == 'bottom': 
-                child.pivot_3d = (0, -gh, 0); child.pre_rot_z = 0; child.fold_axis = 'x'
-                child.fold_multiplier = -1
+                child.pivot_3d = (0, -gh, 0); child.pre_rot_z = 0; child.fold_axis = 'x'; child.fold_multiplier = -1
                 child.layout_pos = (0, -gh); child.layout_rot = 0
-                
             elif edge == 'left': 
-                child.pivot_3d = (-gw/2, -gh/2, 0); child.pre_rot_z = -90; child.fold_axis = 'y'
-                child.fold_multiplier = 1 
+                child.pivot_3d = (-gw/2, -gh/2, 0); child.pre_rot_z = -90; child.fold_axis = 'y'; child.fold_multiplier = 1
                 child.layout_pos = (-gw/2, -gh/2); child.layout_rot = -90
-                
             elif edge == 'right': 
-                child.pivot_3d = (gw/2, -gh/2, 0); child.pre_rot_z = 90; child.fold_axis = 'y'
-                child.fold_multiplier = -1 
+                child.pivot_3d = (gw/2, -gh/2, 0); child.pre_rot_z = 90; child.fold_axis = 'y'; child.fold_multiplier = -1
                 child.layout_pos = (gw/2, -gh/2); child.layout_rot = 90
-            
-            # Platform Legs
             elif edge == 'leg_left':
                 sh = getattr(self, 'shoulder_val', 20); cx = -gw/2 + sh/2
-                child.pivot_3d = (cx, -gh, 0); child.pre_rot_z = 0; child.fold_axis = 'x'
-                child.fold_multiplier = -1
+                child.pivot_3d = (cx, -gh, 0); child.pre_rot_z = 0; child.fold_axis = 'x'; child.fold_multiplier = -1
                 child.layout_pos = (cx, -gh); child.layout_rot = 0
-                
             elif edge == 'leg_right':
                 sh = getattr(self, 'shoulder_val', 20); cx = gw/2 - sh/2
-                child.pivot_3d = (cx, -gh, 0); child.pre_rot_z = 0; child.fold_axis = 'x'
-                child.fold_multiplier = -1
+                child.pivot_3d = (cx, -gh, 0); child.pre_rot_z = 0; child.fold_axis = 'x'; child.fold_multiplier = -1
                 child.layout_pos = (cx, -gh); child.layout_rot = 0
-            
-            # Raddoppio
             elif edge == 'reinf_attach':
-                hl = getattr(self, 'h_low_val', gh*0.6)
-                child.pivot_3d = (0, -hl, 0); child.pre_rot_z = 0; child.fold_axis = 'x'
-                child.fold_multiplier = -1 
+                hl = getattr(self, 'h_low_val', self.height*0.6)
+                child.pivot_3d = (0, -hl, 0); child.pre_rot_z = 0; child.fold_axis = 'x'; child.fold_multiplier = -1
                 child.layout_pos = (0, -hl); child.layout_rot = 0
-
+        
         child.generate_shape()
 
     def generate_shape(self):
@@ -112,14 +92,13 @@ class BoxComponent:
     def get_mesh_3d(self, parent_tm=None):
         tm = self.get_world_transform_3d(parent_tm)
         faces = []
+        
+        # Generiamo le facce usando il poligono esatto definito in generate_shape
+        # Questo mantiene la coerenza col 2D. Il rendering OpenGL gestirà la forma concava.
         vt = [tm((x,y,0)) for x,y in self.polygon]
         vb = [tm((x,y,-self.thickness)) for x,y in self.polygon]
         
-        col = 'cardboard'
-        if "Reinf" in self.name: col = 'cardboard'
-        
-        # Colori (Marrone sopra Z=0, Bianco sotto Z=-T)
-        faces.append({'verts': vt, 'type': 'front', 'name': self.name, 'col': col})     
+        faces.append({'verts': vt, 'type': 'front', 'name': self.name, 'col': 'cardboard'})     
         faces.append({'verts': vb, 'type': 'back', 'name': self.name, 'col': 'white'}) 
         
         n = len(self.polygon)
@@ -168,21 +147,46 @@ class Fianco(BoxComponent):
         super().__init__(name, w, h, t, p, edge, 'fianchi')
         if self.pars.get('r_active'):
             r_h = self.pars.get('r_h', 30); rw = w - 2*self.shoulder_val
-            BoxComponent(f"{name}_Reinf", rw, r_h, t, self, 'reinf_attach', 'lembi') # Label lembi ma nome Reinf
+            BoxComponent(f"{name}_Reinf", rw, r_h, t, self, 'reinf_attach', 'lembi')
 
     def generate_shape(self):
         w, h = self.width, self.height
         if self.shape == 'ferro':
             sh, hl = self.shoulder_val, self.h_low_val
-            p_dx = [(w/2, 0), (w/2, -h)]; p_dx_in = [(w/2 - sh, -h), (w/2 - sh, -hl)]
-            p_sx_in = [(-w/2 + sh, -hl), (-w/2 + sh, -h)]; p_sx = [(-w/2, -h), (-w/2, 0)]
+            # DEFINIZIONE UNICA E PULITA DEL PERIMETRO (senso orario/antiorario coerente)
+            # Partiamo da angolo basso-dx, giriamo senso orario (coordinate locali cartesiane standard)
+            # Nota: il sistema Y è invertito in alcune logiche, ma qui definiamo la forma relativa al pivot.
+            
+            # 1. Lato Destro Esterno
+            pts = [(w/2, 0)] 
+            
+            # Se c'è la platform (scasso angoli)
             if self.pars.get('plat_active'):
-                fh = self.pars.get('fascia_h', 30); ext_w = self.pars.get('plat_flap_w', 40); T = self.thickness
-                cut_x = fh + T/2; cut_y = ext_w + T/2
-                p_dx = [(w/2, 0), (w/2, -h + cut_y), (w/2 - cut_x, -h + cut_y), (w/2 - cut_x, -h)]
-                p_sx = [(-w/2 + cut_x, -h), (-w/2 + cut_x, -h + cut_y), (-w/2, -h + cut_y), (-w/2, 0)]
-            self.polygon = p_dx + p_dx_in + p_sx_in + p_sx
-        else: self.polygon = [(w/2, 0), (w/2, -h), (-w/2, -h), (-w/2, 0)]
+                fh, ext_w, T = self.pars.get('fascia_h', 30), self.pars.get('plat_flap_w', 40), self.thickness
+                cx, cy = fh + T/2, ext_w + T/2
+                # Scasso angolo basso-dx (in alto visualmente perchè Y va verso -h)
+                pts += [(w/2, -h + cy), (w/2 - cx, -h + cy), (w/2 - cx, -h)]
+            else:
+                pts.append((w/2, -h))
+            
+            # 2. Scasso centrale (Ferro di cavallo)
+            # Da bordo dx interno a bordo sx interno
+            pts += [(w/2 - sh, -h), (w/2 - sh, -hl), (-w/2 + sh, -hl), (-w/2 + sh, -h)]
+            
+            # 3. Lato Sinistro Esterno
+            if self.pars.get('plat_active'):
+                fh, ext_w, T = self.pars.get('fascia_h', 30), self.pars.get('plat_flap_w', 40), self.thickness
+                cx, cy = fh + T/2, ext_w + T/2
+                pts += [(-w/2 + cx, -h), (-w/2 + cx, -h + cy), (-w/2, -h + cy)]
+            else:
+                pts.append((-w/2, -h))
+            
+            # 4. Chiusura al basso-sx
+            pts.append((-w/2, 0))
+            
+            self.polygon = pts
+        else: 
+            self.polygon = [(w/2, 0), (w/2, -h), (-w/2, -h), (-w/2, 0)]
 
 class Testata(BoxComponent):
     def __init__(self, name, w, h, t, p, edge, shape='rect', pars={}):
@@ -199,43 +203,43 @@ class Testata(BoxComponent):
         w, h = self.width, self.height
         if self.shape == 'ferro':
             sh, hl = self.shoulder_val, self.h_low_val
-            self.polygon = [(w/2, 0), (w/2, -h), (w/2 - sh, -h), (w/2 - sh, -hl),
-                            (-w/2 + sh, -hl), (-w/2 + sh, -h), (-w/2, -h), (-w/2, 0)]
-        else: self.polygon = [(w/2, 0), (w/2, -h), (-w/2, -h), (-w/2, 0)]
+            # Stessa logica perimetro continuo
+            self.polygon = [
+                (w/2, 0),          # Basso-Dx
+                (w/2, -h),         # Alto-Dx
+                (w/2 - sh, -h),    # Interno-Alto-Dx
+                (w/2 - sh, -hl),   # Interno-Basso-Dx (fondo scasso)
+                (-w/2 + sh, -hl),  # Interno-Basso-Sx
+                (-w/2 + sh, -h),   # Interno-Alto-Sx
+                (-w/2, -h),        # Alto-Sx
+                (-w/2, 0)          # Basso-Sx
+            ]
+        else: 
+            self.polygon = [(w/2, 0), (w/2, -h), (-w/2, -h), (-w/2, 0)]
 
 class BoxManager:
     def __init__(self): self.root = None
-    
     def build(self, p):
         L, W = p['L'], p['W']
-        HF, HT = p['h_fianchi'], p['h_testate']
-        T = p.get('thickness', 5.0)
-        F = p['F']
+        HF, HT, T, F = p['h_fianchi'], p['h_testate'], p.get('thickness', 5.0), p['F']
         LF, WT, HL = L - T, W - T, HT - T
-        
         self.root = Fondo("Fondo", L, W, T, None, None, 'fondo')
-        
         pf = {'cutout_w': p.get('fianchi_cutout_w', L/2), 'h_low': p.get('fianchi_h_low', 0),
               'r_active': p.get('fianchi_r_active', False), 'r_h': p.get('fianchi_r_h', 30),
               'plat_active': p.get('platform_active', False), 'fascia_h': p.get('fascia_h', 30), 'plat_flap_w': p.get('plat_flap_w', 40)}
         sf = p['fianchi_shape']
         Fianco("Fianco_T", LF, HF, T, self.root, 'top', sf, pf)
         Fianco("Fianco_B", LF, HF, T, self.root, 'bottom', sf, pf)
-        
         pt = {'cutout_w': p.get('testate_cutout_w', W/2), 'h_low': p.get('testate_h_low', 0),
               'r_active': p.get('testate_r_active', False), 'r_h': p.get('testate_r_h', 30)}
         st = p['testate_shape']
         tl = Testata("Testata_L", WT, HT, T, self.root, 'left', st, pt)
         tr = Testata("Testata_R", WT, HT, T, self.root, 'right', st, pt)
-        
         for t in [tl, tr]:
-            l1 = BoxComponent(f"{t.name}_L1", HL, F, T, t, 'left', 'lembi')
-            l1.fold_axis = 'y'
-            l2 = BoxComponent(f"{t.name}_L2", HL, F, T, t, 'right', 'lembi')
-            l2.fold_axis = 'y'
-            
+            l1 = BoxComponent(f"{t.name}_L1", HL, F, T, t, 'left', 'lembi'); l1.fold_axis = 'y'
+            l2 = BoxComponent(f"{t.name}_L2", HL, F, T, t, 'right', 'lembi'); l2.fold_axis = 'y'
             if p.get('platform_active'):
-                fh = p.get('fascia_h', 30); ext_w = p.get('plat_flap_w', 30)
+                fh, ext_w = p.get('fascia_h', 30), p.get('plat_flap_w', 30)
                 if pt['r_active'] and st == 'ferro':
                     sh = t.shoulder_val
                     fl = BoxComponent(f"{t.name}_Fascia_L", sh, fh, T, t, 'leg_left', 'fasce')
@@ -246,9 +250,7 @@ class BoxManager:
                     fascia = BoxComponent(f"{t.name}_Fascia", t.width, fh, T, t, 'bottom', 'fasce')
                     BoxComponent("Ext1", fh, ext_w, T, fascia, 'left', 'ext')
                     BoxComponent("Ext2", fh, ext_w, T, fascia, 'right', 'ext')
-
     def get_3d_faces(self): return self.root.get_mesh_3d() if self.root else []
-    
     def get_2d_diagram(self):
         if not self.root: return [], [], []
         polys, creases = self.root.get_layout_2d()
@@ -257,23 +259,13 @@ class BoxManager:
             pts = p['coords']
             for i in range(len(pts)): cut_lines.append([pts[i], pts[(i+1)%len(pts)]])
         return polys, cut_lines, creases
-
     def set_angles(self, angles):
         def visit(n):
-            # FIX ANIMAZIONE: Usiamo n.label invece di n.name per evitare falsi positivi
-            # I raddoppi hanno "Reinf" nel nome ma label variabile, gestiamo per nome
-            if "Reinf" in n.name: 
-                n.fold_angle = angles.get('reinf', 0)
-            elif n.label == 'fasce': 
-                n.fold_angle = angles.get('fasce', 0)
-            elif n.label == 'ext': 
-                n.fold_angle = angles.get('ext', 0)
-            elif n.label == 'lembi': 
-                n.fold_angle = angles.get('lembi', 0)
-            elif n.label == 'testate': 
-                n.fold_angle = angles.get('testate', 0)
-            elif n.label == 'fianchi': 
-                n.fold_angle = angles.get('fianchi', 0)
-                
+            if "Reinf" in n.name: n.fold_angle = angles.get('reinf', 0)
+            elif n.label == 'fasce': n.fold_angle = angles.get('fasce', 0)
+            elif n.label == 'ext': n.fold_angle = angles.get('ext', 0)
+            elif n.label == 'lembi': n.fold_angle = angles.get('lembi', 0)
+            elif n.label == 'testate': n.fold_angle = angles.get('testate', 0)
+            elif n.label == 'fianchi': n.fold_angle = angles.get('fianchi', 0)
             for c in n.children: visit(c)
         if self.root: visit(self.root)
