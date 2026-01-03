@@ -12,13 +12,15 @@ class DrawingArea2D(QWidget):
         self.polygons = []
         self.cut_lines = []
         self.crease_lines = []
+        self.glue_lines = [] 
         self.L = 100
         self.W = 100
 
-    def set_data(self, polygons, cut_lines, crease_lines, L, W, h_f, h_t, F):
+    def set_data(self, polygons, cut_lines, crease_lines, glue_lines, L, W, h_f, h_t, F):
         self.polygons = polygons
         self.cut_lines = cut_lines
         self.crease_lines = crease_lines
+        self.glue_lines = glue_lines 
         self.L = L
         self.W = W
         self.update()
@@ -53,16 +55,37 @@ class DrawingArea2D(QWidget):
             painter.setPen(Qt.NoPen)
             painter.drawPolygon(QPolygonF(pts))
 
+        # --- Disegno Linee Colla (Multicolore) ---
+        glue_colors = [
+            QColor(THEME["line_glue_1"]),
+            QColor(THEME["line_glue_2"]),
+            QColor(THEME["line_glue_3"]),
+            QColor(THEME["line_glue_4"])
+        ]
+        
+        pen_glue = QPen()
+        pen_glue.setWidth(3)
+        pen_glue.setStyle(Qt.SolidLine)
+        pen_glue.setCapStyle(Qt.FlatCap)
+        
+        for (p1, p2), idx in self.glue_lines:
+            col = glue_colors[idx % 4]
+            pen_glue.setColor(col)
+            painter.setPen(pen_glue)
+            painter.drawLine(to_s(*p1), to_s(*p2))
+
+        # --- Disegno Tagli ---
         painter.setPen(QPen(QColor(THEME["line_cut"]), 2))
         for p1, p2 in self.cut_lines: painter.drawLine(to_s(*p1), to_s(*p2))
             
+        # --- Disegno Cordonature ---
         pen_cr = QPen(QColor(THEME["line_crease"]), 2)
         pen_cr.setStyle(Qt.DashLine)
         painter.setPen(pen_cr)
         for p1, p2 in self.crease_lines: painter.drawLine(to_s(*p1), to_s(*p2))
 
 
-# --- CLASSE PARAMETRI ---
+# --- CLASSE PARAMETRI (Rimane invariata) ---
 class ParameterPanel(QWidget):
     params_changed = Signal(dict)
 
@@ -90,7 +113,7 @@ class ParameterPanel(QWidget):
         self.inp_L = self._make_spin(300, 10, 2000)
         self.inp_W = self._make_spin(200, 10, 2000)
         self.inp_T = self._make_spin(5, 1, 20)
-        self.inp_F = self._make_spin(85, 10, 200) # Default 85
+        self.inp_F = self._make_spin(85, 10, 200) 
         
         form_dim.addRow("Lunghezza (L):", self.inp_L)
         form_dim.addRow("Larghezza (W):", self.inp_W)
@@ -99,7 +122,7 @@ class ParameterPanel(QWidget):
         gb_dim.setLayout(form_dim)
         vbox.addWidget(gb_dim)
 
-        # 2. Fianchi e Testate (Creo i widget ma la logica la gestisco dopo)
+        # 2. Fianchi e Testate 
         self.fianchi_panel = self._create_side_panel("Fianchi", default_h=100)
         vbox.addWidget(self.fianchi_panel['group'])
 
@@ -112,7 +135,6 @@ class ParameterPanel(QWidget):
         form_plat = QFormLayout()
         
         self.chk_plat = QCheckBox("Attiva Piattaforma")
-        # Quando cambio la piattaforma, devo aggiornare la UI dei fianchi (per lo scasso)
         self.chk_plat.stateChanged.connect(self.update_ui_state) 
         self.chk_plat.stateChanged.connect(self.emit_change)
         
@@ -129,7 +151,6 @@ class ParameterPanel(QWidget):
         scroll.setWidget(container)
         layout.addWidget(scroll)
 
-        # Inizializza lo stato corretto delle abilitazioni/disabilitazioni
         self.update_ui_state()
 
     def _group_style(self):
@@ -152,11 +173,9 @@ class ParameterPanel(QWidget):
         combo_shape.addItems(["Rettangolare", "Ferro di Cavallo"])
         combo_shape.setStyleSheet(f"background-color: {THEME['bg_draw']}; color: white;")
         
-        # Parametri specifici "Ferro" / "Scasso"
         inp_cutout = self._make_spin(150, 10, 1000)
         inp_h_low = self._make_spin(60, 10, 1000)
         
-        # Raddoppi
         chk_raddoppi = QCheckBox("Raddoppi (Rinforzi)")
         chk_raddoppi.setStyleSheet("color: white;")
         inp_r_h = self._make_spin(30, 10, 300)
@@ -170,7 +189,6 @@ class ParameterPanel(QWidget):
         
         gb.setLayout(form)
         
-        # Connessioni
         combo_shape.currentTextChanged.connect(self.update_ui_state)
         combo_shape.currentTextChanged.connect(self.emit_change)
         chk_raddoppi.stateChanged.connect(self.update_ui_state)
@@ -183,46 +201,31 @@ class ParameterPanel(QWidget):
         }
 
     def update_ui_state(self):
-        """Gestisce le dipendenze complesse tra i widget"""
-        
-        # --- LOGICA FIANCHI ---
+        # LOGICA FIANCHI
         is_ferro_f = (self.fianchi_panel['shape'].currentText() == "Ferro di Cavallo")
         is_plat = self.chk_plat.isChecked()
-        
-        # Lo SCASSO è attivo se è "Ferro di Cavallo" OPPURE se c'è la "Piattaforma"
-        # (perché serve lo spazio per i lembi)
         scasso_active_f = is_ferro_f or is_plat
         self.fianchi_panel['cutout'].setEnabled(scasso_active_f)
         self.fianchi_panel['h_low'].setEnabled(scasso_active_f)
         
-        # I RADDOPPI sono figli SOLO del "Ferro di Cavallo"
-        # Se non è ferro, si disattivano e si toglie la spunta
         if not is_ferro_f:
             self.fianchi_panel['r_active'].setChecked(False)
             self.fianchi_panel['r_active'].setEnabled(False)
         else:
             self.fianchi_panel['r_active'].setEnabled(True)
-            
-        # L'altezza rinforzo è attiva solo se i raddoppi sono attivi
         self.fianchi_panel['r_h'].setEnabled(self.fianchi_panel['r_active'].isChecked())
 
-
-        # --- LOGICA TESTATE ---
+        # LOGICA TESTATE
         is_ferro_t = (self.testate_panel['shape'].currentText() == "Ferro di Cavallo")
-        
-        # Per le testate, lo scasso è legato solo al ferro (per ora)
         self.testate_panel['cutout'].setEnabled(is_ferro_t)
         self.testate_panel['h_low'].setEnabled(is_ferro_t)
         
-        # Raddoppi testate
         if not is_ferro_t:
             self.testate_panel['r_active'].setChecked(False)
             self.testate_panel['r_active'].setEnabled(False)
         else:
             self.testate_panel['r_active'].setEnabled(True)
-            
         self.testate_panel['r_h'].setEnabled(self.testate_panel['r_active'].isChecked())
-
 
     def emit_change(self):
         p = {

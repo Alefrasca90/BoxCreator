@@ -199,16 +199,21 @@ class BoxComponent:
         my_pos, my_rot = self.get_layout_transform_2d(parent_pos, parent_rot)
         rad = math.radians(my_rot)
         c, s = math.cos(rad), math.sin(rad)
+        
+        def to_g(pt): return (pt[0]*c - pt[1]*s + my_pos[0], pt[0]*s + pt[1]*c + my_pos[1])
+
         gp = []
-        for x, y in self.polygon: gp.append((x*c - y*s + my_pos[0], x*s + y*c + my_pos[1]))
+        for x, y in self.polygon: gp.append(to_g((x,y)))
         data = [{'coords': gp, 'type': self.label, 'id': self.name}]
+        
         creases = []
         w = self.width; p1, p2 = (w/2, 0), (-w/2, 0)
-        def to_g(pt): return (pt[0]*c - pt[1]*s + my_pos[0], pt[0]*s + pt[1]*c + my_pos[1])
         if self.parent: creases.append([to_g(p1), to_g(p2)])
+        
         for ch in self.children:
             d, cr = ch.get_layout_2d(my_pos, my_rot)
             data.extend(d); creases.extend(cr)
+            
         return data, creases
 
 class Fondo(BoxComponent):
@@ -224,7 +229,6 @@ class Fianco(BoxComponent):
         self.shoulder_val = max(0, (w - cutout_w) / 2)
         self.h_low_val = pars.get('h_low', h*0.6)
         super().__init__(name, w, h, t, p, edge, 'fianchi')
-        # I RADDOPPI (Reinf) si creano solo se l'utente li ha attivati esplicitamente
         if self.pars.get('r_active'):
             r_h = self.pars.get('r_h', 30); rw = w - 2*self.shoulder_val
             BoxComponent(f"{name}_Reinf", rw, r_h, t, self, 'reinf_attach', 'lembi')
@@ -232,7 +236,6 @@ class Fianco(BoxComponent):
     def generate_shape(self):
         w, h = self.width, self.height
         pts = []
-        # MODIFICA CRUCIALE: Genera la forma "scassata" se è FERRO DI CAVALLO *OPPURE* se c'è la PIATTAFORMA
         if self.shape == 'ferro' or self.pars.get('plat_active'):
             sh, hl = self.shoulder_val, self.h_low_val
             pts = [(w/2, 0)]
@@ -317,8 +320,6 @@ class BoxManager:
             
             if p.get('platform_active'):
                 fh, ext_w = p.get('fascia_h', 30), p.get('plat_flap_w', 30)
-                # Verifica se usare la logica a ferro anche per generare la piattaforma
-                # La piattaforma si attacca ai lati (shoulder) della testata
                 if pt['r_active'] and st == 'ferro':
                     cutout = t.pars['cutout_w']
                     sh_fascia = (WF - cutout) / 2
@@ -334,14 +335,161 @@ class BoxManager:
 
     def get_3d_faces(self): return self.root.get_mesh_3d() if self.root else []
     
-    def get_2d_diagram(self):
-        if not self.root: return [], [], []
+    def get_2d_diagram(self, p=None):
+        if not self.root: return [], [], [], []
+        
         polys, creases = self.root.get_layout_2d()
         cut_lines = []
-        for p in polys:
-            pts = p['coords']
+        for poly in polys:
+            pts = poly['coords']
             for i in range(len(pts)): cut_lines.append([pts[i], pts[(i+1)%len(pts)]])
-        return polys, cut_lines, creases
+            
+        glue_lines = []
+        if p:
+            L, W = p['L'], p['W']
+            HF = p['h_fianchi'] 
+            HT = p['h_testate']
+            plat_active = p.get('platform_active', False)
+            r_active = p.get('fianchi_r_active', False)
+            plat_flap_w = p.get('plat_flap_w', 40)
+            r_h = p.get('fianchi_r_h', 30)
+            h_low = p.get('fianchi_h_low', 60)
+            f_cutout = p.get('fianchi_cutout_w', 0)
+            
+            # --- FUNZIONE GENERAZIONE SEGMENTI (CLIP & SPLIT) ---
+            def generate_valid_segments(y_val, all_polys):
+                valid_segments = []
+                for poly in all_polys:
+                    ptype = poly['type']
+                    pid = poly['id']
+                    
+                    # 1. Filtro Aree Ammesse
+                    is_valid = False
+                    if ptype == 'fianchi': is_valid = True
+                    elif ptype == 'testate': is_valid = True
+                    elif ptype == 'ext': is_valid = True
+                    elif 'Reinf' in pid: is_valid = True
+                    
+                    if not is_valid: continue
+                    
+                    # 2. Intersezione Geometrica Linea-Poligono
+                    pts = poly['coords']
+                    intersections = []
+                    for i in range(len(pts)):
+                        p1, p2 = pts[i], pts[(i+1)%len(pts)]
+                        if (p1[1] < y_val <= p2[1]) or (p2[1] < y_val <= p1[1]):
+                            if abs(p2[1] - p1[1]) > 1e-5:
+                                t = (y_val - p1[1]) / (p2[1] - p1[1])
+                                x_int = p1[0] + t * (p2[0] - p1[0])
+                                intersections.append(x_int)
+                    
+                    intersections.sort()
+                    
+                    # 3. Creazione Segmenti con Margine 5mm
+                    for k in range(0, len(intersections)-1, 2):
+                        x_start = intersections[k] + 5.0
+                        x_end = intersections[k+1] - 5.0
+                        
+                        if x_start >= x_end: continue
+                        
+                        # 4. SPLIT SU FIANCATE FERRO DI CAVALLO (Separazione Spalle)
+                        if ptype == 'fianchi' and p.get('fianchi_shape') == 'ferro':
+                            # La zona centrale "vuota" è [-cutout/2, +cutout/2]
+                            c_half = f_cutout / 2
+                            # Verifichiamo se il segmento attraversa il centro o sta sulle spalle
+                            
+                            # Spalla Sinistra: x < -c_half
+                            seg_L_end = min(x_end, -c_half - 5.0) # Margine 5mm anche qui
+                            if x_start < seg_L_end:
+                                valid_segments.append([(x_start, y_val), (seg_L_end, y_val)])
+                                
+                            # Spalla Destra: x > c_half
+                            seg_R_start = max(x_start, c_half + 5.0)
+                            if seg_R_start < x_end:
+                                valid_segments.append([(seg_R_start, y_val), (x_end, y_val)])
+                        else:
+                            # Caso Standard (Testate, Lembi, o Fianchi Rettangolari)
+                            valid_segments.append([(x_start, y_val), (x_end, y_val)])
+                            
+                return valid_segments
+
+            # --- CALCOLO POSIZIONI Y (Priorità Esterno, Cascata) ---
+            def calculate_positions(limit_inner, limit_fianco, limit_reinf, limit_flap):
+                direction = 1 if limit_inner > limit_fianco else -1
+                candidates = []
+                
+                # GRUPPO 1: RADDOPPI/FIANCATA (Priorità 1)
+                l_outer = limit_reinf if limit_reinf is not None else limit_fianco
+                t1 = l_outer + (5 * direction)
+                t2 = t1 + (15 * direction)
+                candidates.append(t1)
+                candidates.append(t2)
+                
+                # GRUPPO 2: LEMBI PLATFORM (Priorità 2)
+                if limit_flap is not None:
+                    t3 = limit_flap + (5 * direction)
+                    t4 = t3 + (15 * direction)
+                    candidates.append(t3)
+                    candidates.append(t4)
+                
+                while len(candidates) < 4:
+                     candidates.append(candidates[-1] + (15 * direction))
+
+                # Sort Outer->Inner
+                if direction == 1: candidates.sort()
+                else: candidates.sort(reverse=True)
+                
+                # Merge
+                merged = []
+                if candidates:
+                    merged.append(candidates[0])
+                    for c in candidates[1:]:
+                        if abs(c - merged[-1]) > 2.0: merged.append(c)
+                
+                final_y = merged[:4]
+                while len(final_y) < 4: final_y.append(final_y[-1] + (15 * direction))
+
+                # Spaziatura 10mm
+                for i in range(1, 4):
+                    prev, curr = final_y[i-1], final_y[i]
+                    if abs(curr - prev) < 10.0: final_y[i] = prev + (10 * direction)
+                
+                # Vincolo Fondo (Min 15mm)
+                limit_safe = limit_inner - (15 * direction)
+                if (final_y[3] - limit_safe) * direction > 0:
+                    final_y[3] = limit_safe
+                    if abs(final_y[3] - final_y[2]) < 10.0:
+                         final_y[2] = final_y[3] - (10 * direction)
+                         if abs(final_y[2] - final_y[1]) < 10.0:
+                              final_y[1] = final_y[2] - (10 * direction)
+
+                return final_y
+
+            # --- ESECUZIONE ---
+            # Lato ALTO
+            y_top_inner = -W/2
+            y_top_reinf = -(W/2 + h_low + r_h) if r_active else None
+            y_top_fianco = -(W/2 + HF) 
+            y_top_flap = -(W/2 + plat_flap_w) if plat_active else None
+            
+            Ys_top = calculate_positions(y_top_inner, y_top_fianco, y_top_reinf, y_top_flap)
+            
+            # Lato BASSO
+            y_btm_inner = W/2
+            y_btm_reinf = (W/2 + h_low + r_h) if r_active else None
+            y_btm_fianco = W/2 + HF
+            y_btm_flap = (W/2 + plat_flap_w) if plat_active else None
+            
+            Ys_btm = calculate_positions(y_btm_inner, y_btm_fianco, y_btm_reinf, y_btm_flap)
+            
+            for i in range(4):
+                segs_top = generate_valid_segments(Ys_top[i], polys)
+                for s in segs_top: glue_lines.append((s, i))
+                
+                segs_btm = generate_valid_segments(Ys_btm[i], polys)
+                for s in segs_btm: glue_lines.append((s, i))
+
+        return polys, cut_lines, creases, glue_lines
 
     def set_angles(self, angles):
         def visit(n):

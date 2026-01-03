@@ -10,8 +10,13 @@ THEME = {
     "line_cut": "#000000",
     "line_crease": "#00C853",
     
+    # Colori Ugelli Colla (Ciano, Magenta, Giallo, Verde)
+    "line_glue_1": "#00E5FF", 
+    "line_glue_2": "#FF00FF",
+    "line_glue_3": "#FFFF00",
+    "line_glue_4": "#00FF00",
+    
     # Colori 3D OpenGL (RGBA float)
-    # Bianco esterno scurito ulteriormente (da 0.75 a 0.65) per un look grigio chiaro
     "gl_white": (0.65, 0.65, 0.65, 1.0),
     "gl_brown": (0.63, 0.51, 0.39, 1.0),
     "gl_brown_wall": (0.70, 0.58, 0.45, 1.0),

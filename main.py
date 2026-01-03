@@ -57,7 +57,6 @@ class PackagingApp(QMainWindow):
         self.timer.timeout.connect(self.update_frame)
         
         # Traccia dello sfregamento
-        # Chiave: (nome_fianco, nome_lembo, indice_punto) -> Lista di punti locali
         self.traces = {} 
         
         self.refresh()
@@ -133,13 +132,22 @@ class PackagingApp(QMainWindow):
             self.viewer_3d.set_scene(self.box_manager)
             self.viewer_3d.update_angles(self.anim_vars.get('angles', {}))
             
-            polys, cuts, creases = self.box_manager.get_2d_diagram()
+            polys, cuts, creases, glues = self.box_manager.get_2d_diagram(p)
+            
             ox, oy = p['L']/2 + 50, p['W']/2 + 50
             off_p = [{'coords':[(x+ox, y+oy) for x,y in poly['coords']], 'type': poly['type']} for poly in polys]
             off_c = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in cuts]
             off_cr = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in creases]
             
-            self.canvas_2d.set_data(off_p, off_c, off_cr, p['L'], p['W'], 0,0,0)
+            # Gestione offset per coppie (Coordinate, Indice)
+            off_gl = []
+            for lines, idx in glues:
+                p1, p2 = lines
+                p1_off = (p1[0]+ox, p1[1]+oy)
+                p2_off = (p2[0]+ox, p2[1]+oy)
+                off_gl.append( ([p1_off, p2_off], idx) )
+            
+            self.canvas_2d.set_data(off_p, off_c, off_cr, off_gl, p['L'], p['W'], 0,0,0)
         except Exception: traceback.print_exc()
 
     def reset_traces(self):
@@ -174,7 +182,6 @@ class PackagingApp(QMainWindow):
             ang = v['angles']
             def lerp(t, s, e, max_a=90): return 0 if t<s else (max_a if t>e else (t-s)/(e-s)*max_a)
             
-            # --- 1. Animazione Base ---
             target_lembi   = lerp(t, 0.0, 1.0)
             target_testate = lerp(t, 0.0, 1.0) 
             target_fianchi = lerp(t, 0.5, 1.0)
@@ -185,7 +192,6 @@ class PackagingApp(QMainWindow):
             ang['ext']     = lerp(t, 1.5, 2.5)
             ang['reinf']   = lerp(t, 2.0, 3.0, 180)
 
-            # --- 2. Fisica: Spinta della Fiancata sul Lembo ---
             rad_t = math.radians(target_testate)
             rad_f = math.radians(target_fianchi)
             if rad_t > 1.55: rad_t = 1.55
@@ -196,7 +202,6 @@ class PackagingApp(QMainWindow):
             actual_lembo_deg = max(target_lembi, min_lembo_deg)
             ang['lembi'] = actual_lembo_deg
             
-            # --- 3. Generazione Traccia "Gessetto" ---
             is_pushing = (min_lembo_deg > target_lembi + 0.2)
             
             if is_pushing and self.box_manager.root:
@@ -215,7 +220,6 @@ class PackagingApp(QMainWindow):
         self.draw_traces()
 
     def get_absolute_transform(self, comp):
-        """Risale la catena dei genitori per calcolare la vera trasformazione globale."""
         chain = []
         curr = comp
         while curr:
@@ -229,7 +233,6 @@ class PackagingApp(QMainWindow):
         return tm
 
     def record_traces(self):
-        """Registra i punti di contatto separando ogni punta di ogni lembo."""
         parts = {}
         def traverse(node):
             parts[node.name] = node
@@ -241,9 +244,6 @@ class PackagingApp(QMainWindow):
         
         for lembo in lembi:
             tm_l = self.get_absolute_transform(lembo)
-            
-            # Identifichiamo i due angoli della punta del lembo con un ID (0 e 1)
-            # Questo previene l'effetto "ragnatela" collegando punti diversi
             tips_local = [
                 ((lembo.width/2, -lembo.height, 0), 0),
                 ((-lembo.width/2, -lembo.height, 0), 1)
@@ -255,17 +255,14 @@ class PackagingApp(QMainWindow):
                 for fianco in fianchi:
                     p_loc = self.world_to_local(fianco, tip_world)
                     
-                    # Tolleranza collisione e bounding box locale fiancata
                     if abs(p_loc[2]) < 10.0 or abs(p_loc[2] + fianco.thickness) < 10.0:
                         if (-fianco.width/2 <= p_loc[0] <= fianco.width/2) and \
                            (-fianco.height <= p_loc[1] <= 10.0):
                             
-                            # CHIAVE DI TRACCIA UNICA PER PUNTO
                             trace_key = (fianco.name, lembo.name, tip_idx)
                             
                             if trace_key not in self.traces: self.traces[trace_key] = []
                             
-                            # Evita punti troppo vicini
                             add_point = True
                             if self.traces[trace_key]:
                                 last = self.traces[trace_key][-1]
@@ -276,12 +273,9 @@ class PackagingApp(QMainWindow):
                                 self.traces[trace_key].append(p_loc)
 
     def world_to_local(self, comp, p_world):
-        """Inversa della trasformazione gerarchica locale."""
-        # 1. Un-Translate
         px, py, pz = comp.pivot_3d
         vx, vy, vz = p_world[0] - px, p_world[1] - py, p_world[2] - pz
         
-        # 2. Un-Fold
         rad_f = math.radians(comp.fold_angle * comp.fold_multiplier)
         cf, sf = math.cos(rad_f), math.sin(rad_f)
         
@@ -294,7 +288,6 @@ class PackagingApp(QMainWindow):
             ly = vy
             lz = vx * sf + vz * cf
             
-        # 3. Un-PreRotZ
         rad_p = math.radians(comp.pre_rot_z)
         cp, sp = math.cos(rad_p), math.sin(rad_p)
         
@@ -305,7 +298,6 @@ class PackagingApp(QMainWindow):
         return (final_x, final_y, final_z)
 
     def draw_traces(self):
-        """Disegna linee separate per ogni traccia registrata."""
         if not self.traces: return
         
         lines = []
@@ -315,7 +307,6 @@ class PackagingApp(QMainWindow):
             for c in node.children: traverse(c)
         traverse(self.box_manager.root)
         
-        # Itera su ogni singola traccia (angolo specifico di un lembo su un fianco)
         for (fname, lname, tidx), points in self.traces.items():
             if fname in parts:
                 fianco = parts[fname]
