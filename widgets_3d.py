@@ -16,6 +16,7 @@ class Viewer3D(QOpenGLWidget):
         self.drag_start = None
         self.transparency_mode = False
         self.camera_dist = 1400 
+        self.extra_lines = [] # Linee di debug/visualizzazione (es. sfregamento)
 
         # Antialiasing attivo per bordi lisci
         fmt = QSurfaceFormat()
@@ -28,6 +29,11 @@ class Viewer3D(QOpenGLWidget):
 
     def set_transparency(self, enabled):
         self.transparency_mode = enabled
+        self.update()
+        
+    def set_extra_lines(self, lines):
+        """Imposta linee extra da disegnare (lista di tuple (p1, p2))"""
+        self.extra_lines = lines
         self.update()
 
     def update_angles(self, angles):
@@ -46,22 +52,15 @@ class Viewer3D(QOpenGLWidget):
         
         # --- SETUP LUCI BILANCIATO ---
         glEnable(GL_LIGHTING)
-        glEnable(GL_LIGHT0) # Key Light
-        glEnable(GL_LIGHT1) # Fill Light
+        glEnable(GL_LIGHT0) 
+        glEnable(GL_LIGHT1) 
         
-        # 1. LUCE PRINCIPALE (SOLE): Ridotta intensità
-        # Prima era quasi 1.0 (troppo forte). Ora è 0.75 per evitare bianchi bruciati.
         glLightfv(GL_LIGHT0, GL_DIFFUSE,  [0.75, 0.75, 0.75, 1.0])
         glLightfv(GL_LIGHT0, GL_SPECULAR, [0.1, 0.1, 0.1, 1.0]) 
         
-        # 2. LUCE DI RIEMPIMENTO: Aumentata intensità
-        # Serve a schiarire le parti in ombra. Da 0.3 a 0.55.
         glLightfv(GL_LIGHT1, GL_DIFFUSE,  [0.55, 0.55, 0.60, 1.0])
         glLightfv(GL_LIGHT1, GL_SPECULAR, [0.0, 0.0, 0.0, 1.0])
         
-        # 3. LUCE AMBIENTALE: Molto più alta
-        # Garantisce che il marrone resti marrone e non diventi nero.
-        # Da 0.4 a 0.65.
         glLightModelfv(GL_LIGHT_MODEL_AMBIENT, [0.65, 0.65, 0.65, 1.0])
         
         glEnable(GL_COLOR_MATERIAL)
@@ -90,14 +89,12 @@ class Viewer3D(QOpenGLWidget):
         return (nx/l, ny/l, nz/l)
 
     def paintGL(self):
-        # Sfondo grigio leggermente più chiaro per ridurre il contrasto visivo
         glClearColor(0.25, 0.25, 0.25, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         
         if not self.manager: return
         glLoadIdentity()
         
-        # Luci Fisse
         glLightfv(GL_LIGHT0, GL_POSITION, [800.0, 1200.0, 1200.0, 1.0]) 
         glLightfv(GL_LIGHT1, GL_POSITION, [-800.0, -500.0, 500.0, 1.0]) 
 
@@ -135,6 +132,18 @@ class Viewer3D(QOpenGLWidget):
                 glBegin(GL_POLYGON)
                 for v in face['verts']: glVertex3f(v[0], v[1], v[2])
                 glEnd()
+
+        # --- DISEGNO LINEE EXTRA (Es. Sfregamento Gessetto) ---
+        if self.extra_lines:
+            glDisable(GL_LIGHTING)
+            glLineWidth(2.5)
+            glColor4f(1.0, 0.2, 0.2, 1.0) # Rosso Gessetto
+            glBegin(GL_LINES)
+            for p1, p2 in self.extra_lines:
+                glVertex3f(p1[0], p1[1], p1[2])
+                glVertex3f(p2[0], p2[1], p2[2])
+            glEnd()
+            glEnable(GL_LIGHTING)
 
     def mousePressEvent(self, e): self.drag_start = e.position().toPoint()
     def mouseMoveEvent(self, e):

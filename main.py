@@ -1,4 +1,5 @@
 import sys
+import math
 import traceback
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QScrollArea, QPushButton, QLabel, 
@@ -54,6 +55,10 @@ class PackagingApp(QMainWindow):
         self.anim_vars = {'idx': 0, 'prog': 0.0, 'angles': {}, 'key': '', 'active': False, 'comb': False}
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
+        
+        # Traccia dello sfregamento
+        # Chiave: (nome_fianco, nome_lembo, indice_punto) -> Lista di punti locali
+        self.traces = {} 
         
         self.refresh()
 
@@ -137,10 +142,14 @@ class PackagingApp(QMainWindow):
             self.canvas_2d.set_data(off_p, off_c, off_cr, p['L'], p['W'], 0,0,0)
         except Exception: traceback.print_exc()
 
+    def reset_traces(self):
+        self.traces = {}
+        self.viewer_3d.set_extra_lines([])
+
     def anim_step(self):
         if self.anim_vars['active']: return
+        self.reset_traces()
         self.tabs.setCurrentIndex(1)
-        # Sequenza step-by-step
         st = ['lembi', 'testate', 'fianchi', 'fasce', 'ext', 'reinf']
         if self.anim_vars['idx'] >= len(st):
             self.anim_vars['idx'] = 0
@@ -152,6 +161,7 @@ class PackagingApp(QMainWindow):
 
     def anim_all(self):
         if self.anim_vars['active']: return
+        self.reset_traces()
         self.tabs.setCurrentIndex(1)
         self.anim_vars.update({'angles': {}, 'prog': 0.0, 'active': True, 'comb': True})
         self.timer.start(20)
@@ -159,29 +169,163 @@ class PackagingApp(QMainWindow):
     def update_frame(self):
         v = self.anim_vars
         if v['comb']:
-            v['prog'] += 0.02
+            v['prog'] += 0.015
             t = v['prog']
             ang = v['angles']
             def lerp(t, s, e, max_a=90): return 0 if t<s else (max_a if t>e else (t-s)/(e-s)*max_a)
             
-            # --- SEQUENZA TEMPORALE RIGOROSA ---
-            ang['lembi']   = lerp(t, 0.0, 1.0) # 1. Lembi incollaggio
-            ang['testate'] = lerp(t, 1.0, 2.0) # 2. Testate
-            ang['fianchi'] = lerp(t, 2.0, 3.0) # 3. Fianchi
-            ang['fasce']   = lerp(t, 3.0, 4.0) # 4. Fasce Platform
-            ang['ext']     = lerp(t, 4.0, 5.0) # 5. Lembi Platform
-            ang['reinf']   = lerp(t, 5.0, 6.0, 180) # 6. Raddoppi (180°)
+            # --- 1. Animazione Base ---
+            target_lembi   = lerp(t, 0.0, 1.0)
+            target_testate = lerp(t, 0.0, 1.0) 
+            target_fianchi = lerp(t, 0.5, 1.0)
             
-            if t >= 6.0: self.timer.stop(); v['active'] = False
+            ang['testate'] = target_testate
+            ang['fianchi'] = target_fianchi
+            ang['fasce']   = lerp(t, 1.0, 1.5)
+            ang['ext']     = lerp(t, 1.5, 2.5)
+            ang['reinf']   = lerp(t, 2.0, 3.0, 180)
+
+            # --- 2. Fisica: Spinta della Fiancata sul Lembo ---
+            rad_t = math.radians(target_testate)
+            rad_f = math.radians(target_fianchi)
+            if rad_t > 1.55: rad_t = 1.55
+            
+            min_lembo_rad = math.atan(math.tan(rad_f) / math.cos(rad_t))
+            min_lembo_deg = math.degrees(min_lembo_rad)
+            
+            actual_lembo_deg = max(target_lembi, min_lembo_deg)
+            ang['lembi'] = actual_lembo_deg
+            
+            # --- 3. Generazione Traccia "Gessetto" ---
+            is_pushing = (min_lembo_deg > target_lembi + 0.2)
+            
+            if is_pushing and self.box_manager.root:
+                self.record_traces()
+
+            if t >= 3.0: 
+                self.timer.stop(); v['active'] = False
         else:
             v['prog'] += 0.05
             if v['prog'] >= 1.0:
                 v['prog'] = 1.0; self.timer.stop(); v['active'] = False; v['idx'] += 1
-            
             target = 180 if v['key'] == 'reinf' else 90
             v['angles'][v['key']] = v['prog'] * target
             
         self.viewer_3d.update_angles(v['angles'])
+        self.draw_traces()
+
+    def get_absolute_transform(self, comp):
+        """Risale la catena dei genitori per calcolare la vera trasformazione globale."""
+        chain = []
+        curr = comp
+        while curr:
+            chain.append(curr)
+            curr = curr.parent
+        chain.reverse() 
+        
+        tm = None 
+        for c in chain:
+            tm = c.get_world_transform_3d(parent_tm=tm)
+        return tm
+
+    def record_traces(self):
+        """Registra i punti di contatto separando ogni punta di ogni lembo."""
+        parts = {}
+        def traverse(node):
+            parts[node.name] = node
+            for c in node.children: traverse(c)
+        traverse(self.box_manager.root)
+
+        lembi = [n for n in parts.values() if getattr(n, 'label', '') == 'lembi']
+        fianchi = [n for n in parts.values() if getattr(n, 'label', '') == 'fianchi' or n.name.startswith('Fianco')]
+        
+        for lembo in lembi:
+            tm_l = self.get_absolute_transform(lembo)
+            
+            # Identifichiamo i due angoli della punta del lembo con un ID (0 e 1)
+            # Questo previene l'effetto "ragnatela" collegando punti diversi
+            tips_local = [
+                ((lembo.width/2, -lembo.height, 0), 0),
+                ((-lembo.width/2, -lembo.height, 0), 1)
+            ]
+            
+            for pt_local, tip_idx in tips_local:
+                tip_world = tm_l(pt_local)
+                
+                for fianco in fianchi:
+                    p_loc = self.world_to_local(fianco, tip_world)
+                    
+                    # Tolleranza collisione e bounding box locale fiancata
+                    if abs(p_loc[2]) < 10.0 or abs(p_loc[2] + fianco.thickness) < 10.0:
+                        if (-fianco.width/2 <= p_loc[0] <= fianco.width/2) and \
+                           (-fianco.height <= p_loc[1] <= 10.0):
+                            
+                            # CHIAVE DI TRACCIA UNICA PER PUNTO
+                            trace_key = (fianco.name, lembo.name, tip_idx)
+                            
+                            if trace_key not in self.traces: self.traces[trace_key] = []
+                            
+                            # Evita punti troppo vicini
+                            add_point = True
+                            if self.traces[trace_key]:
+                                last = self.traces[trace_key][-1]
+                                dist = math.sqrt((last[0]-p_loc[0])**2 + (last[1]-p_loc[1])**2)
+                                if dist < 2.0: add_point = False
+                            
+                            if add_point:
+                                self.traces[trace_key].append(p_loc)
+
+    def world_to_local(self, comp, p_world):
+        """Inversa della trasformazione gerarchica locale."""
+        # 1. Un-Translate
+        px, py, pz = comp.pivot_3d
+        vx, vy, vz = p_world[0] - px, p_world[1] - py, p_world[2] - pz
+        
+        # 2. Un-Fold
+        rad_f = math.radians(comp.fold_angle * comp.fold_multiplier)
+        cf, sf = math.cos(rad_f), math.sin(rad_f)
+        
+        if comp.fold_axis == 'x':
+            lx = vx
+            ly = vy * cf + vz * sf
+            lz = -vy * sf + vz * cf
+        else: # y axis
+            lx = vx * cf - vz * sf
+            ly = vy
+            lz = vx * sf + vz * cf
+            
+        # 3. Un-PreRotZ
+        rad_p = math.radians(comp.pre_rot_z)
+        cp, sp = math.cos(rad_p), math.sin(rad_p)
+        
+        final_x = lx * cp + ly * sp
+        final_y = -lx * sp + ly * cp
+        final_z = lz
+        
+        return (final_x, final_y, final_z)
+
+    def draw_traces(self):
+        """Disegna linee separate per ogni traccia registrata."""
+        if not self.traces: return
+        
+        lines = []
+        parts = {}
+        def traverse(node):
+            parts[node.name] = node
+            for c in node.children: traverse(c)
+        traverse(self.box_manager.root)
+        
+        # Itera su ogni singola traccia (angolo specifico di un lembo su un fianco)
+        for (fname, lname, tidx), points in self.traces.items():
+            if fname in parts:
+                fianco = parts[fname]
+                tm = self.get_absolute_transform(fianco)
+                
+                world_pts = [tm(p) for p in points]
+                for i in range(len(world_pts) - 1):
+                    lines.append((world_pts[i], world_pts[i+1]))
+                    
+        self.viewer_3d.set_extra_lines(lines)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
