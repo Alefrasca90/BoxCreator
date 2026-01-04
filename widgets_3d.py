@@ -17,7 +17,7 @@ class Viewer3D(QOpenGLWidget):
         self.transparency_mode = False
         self.camera_dist = 1400 
         self.extra_lines = [] # Linee di debug/sfregamento (Rosse)
-        self.glue_lines = []  # Linee colla (Multicolore)
+        self.glue_lines = []  # Linee colla (Multicolore/Grigie)
 
         # Antialiasing attivo per bordi lisci
         fmt = QSurfaceFormat()
@@ -38,7 +38,9 @@ class Viewer3D(QOpenGLWidget):
         self.update()
 
     def set_glue_lines(self, lines):
-        """Imposta linee colla da disegnare (lista di tuple (p1, p2, color_tuple))"""
+        """Imposta linee colla da disegnare.
+           Formato: lista di (p1, p2, color_tuple, normal_vector)
+        """
         self.glue_lines = lines
         self.update()
 
@@ -108,48 +110,69 @@ class Viewer3D(QOpenGLWidget):
         glRotatef(self.cam_pitch - 90, 1, 0, 0)
         glRotatef(self.cam_yaw, 0, 0, 1)
 
-        faces = self.manager.get_3d_faces()
-        
-        for face in faces:
-            c_type = face.get('col', 'cardboard')
-            
-            if c_type == 'white': 
-                col = THEME["gl_white"]
-            elif c_type == 'cardboard': 
-                col = THEME["gl_brown"]
-            else: 
-                col = THEME["gl_white"]
+        # --- FUNZIONI DI DISEGNO LOCALI ---
+        def draw_faces():
+            faces = self.manager.get_3d_faces()
+            for face in faces:
+                c_type = face.get('col', 'cardboard')
+                
+                if c_type == 'white': 
+                    col = THEME["gl_white"]
+                elif c_type == 'cardboard': 
+                    col = THEME["gl_brown"]
+                else: 
+                    col = THEME["gl_white"]
 
-            if face['type'] == 'side': col = THEME["gl_brown_dark"]
-            
-            alpha = 0.55 if self.transparency_mode else 1.0
-            glColor4f(col[0], col[1], col[2], alpha)
-            
-            nx, ny, nz = self.calc_normal(face['verts'])
-            glNormal3f(nx, ny, nz)
-            
-            if face['type'] in ['front', 'back']:
-                gluTessBeginPolygon(self.tess, None)
-                gluTessBeginContour(self.tess)
-                for v in face['verts']: gluTessVertex(self.tess, v, v)
-                gluTessEndContour(self.tess)
-                gluTessEndPolygon(self.tess)
-            else:
-                glBegin(GL_POLYGON)
-                for v in face['verts']: glVertex3f(v[0], v[1], v[2])
-                glEnd()
+                if face['type'] == 'side': col = THEME["gl_brown_dark"]
+                
+                alpha = 0.55 if self.transparency_mode else 1.0
+                glColor4f(col[0], col[1], col[2], alpha)
+                
+                nx, ny, nz = self.calc_normal(face['verts'])
+                glNormal3f(nx, ny, nz)
+                
+                if face['type'] in ['front', 'back']:
+                    gluTessBeginPolygon(self.tess, None)
+                    gluTessBeginContour(self.tess)
+                    for v in face['verts']: gluTessVertex(self.tess, v, v)
+                    gluTessEndContour(self.tess)
+                    gluTessEndPolygon(self.tess)
+                else:
+                    glBegin(GL_POLYGON)
+                    for v in face['verts']: glVertex3f(v[0], v[1], v[2])
+                    glEnd()
 
-        # --- DISEGNO LINEE COLLA (Multicolore) ---
-        if self.glue_lines:
-            glDisable(GL_LIGHTING)
-            glLineWidth(3.0)
-            glBegin(GL_LINES)
-            for p1, p2, col in self.glue_lines:
-                glColor4f(col[0], col[1], col[2], 1.0)
-                glVertex3f(p1[0], p1[1], p1[2])
-                glVertex3f(p2[0], p2[1], p2[2])
-            glEnd()
+        def draw_glue():
+            if not self.glue_lines: return
+            
             glEnable(GL_LIGHTING)
+            glEnable(GL_COLOR_MATERIAL)
+            
+            for item in self.glue_lines:
+                if len(item) == 4:
+                    p1, p2, col, normal = item
+                    glColor4f(col[0], col[1], col[2], 1.0)
+                    self.draw_glue_dome(p1, p2, normal)
+                else:
+                    # Fallback
+                    p1, p2, col = item
+                    glColor4f(col[0], col[1], col[2], 1.0)
+                    glBegin(GL_LINES)
+                    glVertex3f(p1[0], p1[1], p1[2])
+                    glVertex3f(p2[0], p2[1], p2[2])
+                    glEnd()
+
+        # --- LOGICA DI DISEGNO BASATA SULLA TRASPARENZA ---
+        if self.transparency_mode:
+            # 1. Disegna PRIMA la colla (opaca, scrive nel Depth Buffer)
+            draw_glue()
+            # 2. Disegna DOPO le facce (trasparenti, blendano sopra la colla)
+            # Nota: Manteniamo DepthMask TRUE per avere l'occlusione corretta tra le facce stesse (frontale copre posteriore)
+            draw_faces()
+        else:
+            # Modalità Opaca Standard: Prima le facce (occludono l'interno), poi la colla (se visibile)
+            draw_faces()
+            draw_glue()
 
         # --- DISEGNO LINEE EXTRA (Es. Sfregamento Gessetto) ---
         if self.extra_lines:
@@ -162,6 +185,56 @@ class Viewer3D(QOpenGLWidget):
                 glVertex3f(p2[0], p2[1], p2[2])
             glEnd()
             glEnable(GL_LIGHTING)
+
+    def draw_glue_dome(self, p1, p2, normal):
+        """
+        Disegna un semicilindro (cupola) lungo il vettore p2-p1.
+        Larghezza = 3mm (R=1.5), Altezza = 2mm (R=2.0).
+        Orientato lungo la normale della superficie.
+        """
+        # 1. Calcola il vettore tangente T = P2 - P1
+        tx, ty, tz = p2[0]-p1[0], p2[1]-p1[1], p2[2]-p1[2]
+        
+        # 2. Calcola il vettore binormale B (perpendicolare a T e N) -> asse della larghezza
+        nx, ny, nz = normal
+        bx = ty*nz - tz*ny
+        by = tz*nx - tx*nz
+        bz = tx*ny - ty*nx
+        
+        # Normalizza B
+        l_b = math.sqrt(bx*bx + by*by + bz*bz)
+        if l_b > 0:
+            bx, by, bz = bx/l_b, by/l_b, bz/l_b
+        else:
+            return 
+
+        # Dimensioni
+        R_width = 1.5  # Larghezza 3mm -> raggio 1.5
+        R_height = 2.0 # Altezza 2mm
+        
+        steps = 12
+        glBegin(GL_TRIANGLE_STRIP)
+        
+        for i in range(steps + 1):
+            theta = math.pi * i / steps
+            c = math.cos(theta) 
+            s = math.sin(theta) 
+            
+            off_x = bx * (R_width * c) + nx * (R_height * s)
+            off_y = by * (R_width * c) + ny * (R_height * s)
+            off_z = bz * (R_width * c) + nz * (R_height * s)
+            
+            l_off = math.sqrt(off_x*off_x + off_y*off_y + off_z*off_z)
+            if l_off > 0:
+                norm_v = (off_x/l_off, off_y/l_off, off_z/l_off)
+            else:
+                norm_v = (0, 0, 1)
+            
+            glNormal3f(norm_v[0], norm_v[1], norm_v[2])
+            glVertex3f(p1[0] + off_x, p1[1] + off_y, p1[2] + off_z)
+            glVertex3f(p2[0] + off_x, p2[1] + off_y, p2[2] + off_z)
+            
+        glEnd()
 
     def mousePressEvent(self, e): self.drag_start = e.position().toPoint()
     def mouseMoveEvent(self, e):

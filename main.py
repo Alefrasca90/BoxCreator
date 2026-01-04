@@ -167,12 +167,9 @@ class PackagingApp(QMainWindow):
             
             if self.box_manager.root:
                 map_layout(self.box_manager.root)
-
-            glue_colors_hex = [THEME["line_glue_1"], THEME["line_glue_2"], THEME["line_glue_3"], THEME["line_glue_4"]]
-            glue_colors_rgb = []
-            for h in glue_colors_hex:
-                c = QColor(h)
-                glue_colors_rgb.append( (c.redF(), c.greenF(), c.blueF()) )
+            
+            # --- COLORE GRIGIO PER IL 3D ---
+            glue_color_gray = (0.6, 0.6, 0.6)
 
             for lines, idx, pid in glues:
                 if pid in comp_map:
@@ -196,7 +193,7 @@ class PackagingApp(QMainWindow):
                         'comp': comp,
                         'p1': p1_loc,
                         'p2': p2_loc,
-                        'col': glue_colors_rgb[idx % 4]
+                        'col': glue_color_gray # Forza il grigio
                     })
             
             self.update_3d_glue_lines()
@@ -214,7 +211,20 @@ class PackagingApp(QMainWindow):
             p1_3d = tm((g['p1'][0], g['p1'][1], 0.2)) 
             p2_3d = tm((g['p2'][0], g['p2'][1], 0.2))
             
-            lines_3d.append( (p1_3d, p2_3d, g['col']) )
+            # Calcolo Vettore Normale (Direzione "UP" locale ruotata)
+            # La normale locale è (0, 0, 1)
+            p_zero = tm((0,0,0))
+            p_up = tm((0,0,1))
+            
+            dx, dy, dz = p_up[0]-p_zero[0], p_up[1]-p_zero[1], p_up[2]-p_zero[2]
+            length = math.sqrt(dx*dx + dy*dy + dz*dz)
+            if length > 0:
+                normal_3d = (dx/length, dy/length, dz/length)
+            else:
+                normal_3d = (0, 0, 1)
+
+            # Aggiungo la normale ai dati passati
+            lines_3d.append( (p1_3d, p2_3d, g['col'], normal_3d) )
             
         self.viewer_3d.set_glue_lines(lines_3d)
 

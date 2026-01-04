@@ -55,23 +55,15 @@ class DrawingArea2D(QWidget):
             painter.setPen(Qt.NoPen)
             painter.drawPolygon(QPolygonF(pts))
 
-        # --- Disegno Linee Colla (Multicolore) ---
-        glue_colors = [
-            QColor(THEME["line_glue_1"]),
-            QColor(THEME["line_glue_2"]),
-            QColor(THEME["line_glue_3"]),
-            QColor(THEME["line_glue_4"])
-        ]
-        
+        # --- Disegno Linee Colla (Rosso) ---
         pen_glue = QPen()
         pen_glue.setWidth(3)
         pen_glue.setStyle(Qt.SolidLine)
         pen_glue.setCapStyle(Qt.FlatCap)
+        pen_glue.setColor(Qt.red) # Colore rosso forzato per tutti i tratti
         
+        painter.setPen(pen_glue)
         for (p1, p2), idx in self.glue_lines:
-            col = glue_colors[idx % 4]
-            pen_glue.setColor(col)
-            painter.setPen(pen_glue)
             painter.drawLine(to_s(*p1), to_s(*p2))
 
         # --- Disegno Tagli ---
