@@ -1,0 +1,33 @@
+{
+    "L": "400",
+    "W": "300",
+    "thickness": "5",
+    "h_fianchi": "100",
+    "fianchi_h_low": "60",
+    "fianchi_cutout_w": "220",
+    "fianchi_r_h": "40",
+    "h_testate": "100",
+    "testate_h_low": "60",
+    "testate_cutout_w": "180",
+    "testate_r_h": "30",
+    "fascia_h": "35",
+    "plat_flap_w": "40",
+    "F": "85",
+    "cb_f_shape": true,
+    "cb_f_reinf": true,
+    "cb_t_shape": true,
+    "cb_t_reinf": true,
+    "cb_plat": true,
+    "theme_brown": [
+        0.49803921580314636,
+        0.4156862795352936,
+        0.2862745225429535,
+        1.0
+    ],
+    "theme_white": [
+        0.11764705926179886,
+        0.37254902720451355,
+        0.13725490868091583,
+        1.0
+    ]
+}

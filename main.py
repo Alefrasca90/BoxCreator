@@ -1,9 +1,10 @@
 import sys
 import math
 import traceback
+import json
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QScrollArea, QPushButton, QLabel, 
-                               QLineEdit, QCheckBox, QTabWidget, QColorDialog)
+                               QLineEdit, QCheckBox, QTabWidget, QColorDialog, QFileDialog)
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 
@@ -74,21 +75,34 @@ class PackagingApp(QMainWindow):
         lbl.setAlignment(Qt.AlignCenter)
         self.panel_layout.insertWidget(0, lbl)
 
-        # --- SEZIONE COLORI RICHIESTA (Nomi Scambiati) ---
-        s0 = self.add_sec("0. Aspetto & Colori", [])
+        # --- SEZIONE 0: FILE & COLORI ---
+        s0 = self.add_sec("0. Gestione File & Colori", [])
         
-        # btn_col_out ora comanda il "Colore Interno" (gl_brown) come richiesto dallo scambio
-        btn_col_out = QPushButton("🎨 Colore Interno")
+        # Pulsanti Salva / Carica
+        h_file = QHBoxLayout()
+        btn_save = QPushButton("💾 Salva"); btn_save.clicked.connect(self.save_project)
+        btn_save.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
+        btn_load = QPushButton("📂 Carica"); btn_load.clicked.connect(self.load_project)
+        btn_load.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
+        h_file.addWidget(btn_save); h_file.addWidget(btn_load)
+        
+        w_file = QWidget(); w_file.setLayout(h_file)
+        s0.add_widget(w_file)
+
+        # Pulsanti Colore
+        h_col = QHBoxLayout()
+        btn_col_out = QPushButton("🎨 Interno") # gl_brown
         btn_col_out.clicked.connect(self.change_color_out)
         btn_col_out.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
-        s0.add_widget(btn_col_out)
-
-        # btn_col_in ora comanda il "Colore Esterno" (gl_white)
-        btn_col_in = QPushButton("🎨 Colore Esterno")
+        
+        btn_col_in = QPushButton("🎨 Esterno") # gl_white
         btn_col_in.clicked.connect(self.change_color_in)
         btn_col_in.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
-        s0.add_widget(btn_col_in)
-        # -------------------------------------------------
+        h_col.addWidget(btn_col_out); h_col.addWidget(btn_col_in)
+        
+        w_col = QWidget(); w_col.setLayout(h_col)
+        s0.add_widget(w_col)
+        # --------------------------------
 
         self.add_sec("1. Fondo", [("Lunghezza", "L", 400), ("Larghezza", "W", 300), ("Spessore", "thickness", 5)])
         
@@ -123,6 +137,63 @@ class PackagingApp(QMainWindow):
         btn_all.setStyleSheet("background: #FF9800; padding: 10px;")
         self.panel_layout.addWidget(btn_all)
         self.panel_layout.addStretch()
+
+    def save_project(self):
+        data = {}
+        # Salva valori numerici (QLineEdit)
+        for k, inp in self.inputs.items():
+            data[k] = inp.text()
+        
+        # Salva stati Checkbox
+        data['cb_f_shape'] = self.cb_f_shape.isChecked()
+        data['cb_f_reinf'] = self.cb_f_reinf.isChecked()
+        data['cb_t_shape'] = self.cb_t_shape.isChecked()
+        data['cb_t_reinf'] = self.cb_t_reinf.isChecked()
+        data['cb_plat']    = self.cb_plat.isChecked()
+        
+        # Salva Colori Correnti (Opzionale ma utile)
+        data['theme_brown'] = THEME['gl_brown']
+        data['theme_white'] = THEME['gl_white']
+
+        filename, _ = QFileDialog.getSaveFileName(self, "Salva Fustella", "", "JSON Files (*.json)")
+        if filename:
+            try:
+                with open(filename, 'w') as f:
+                    json.dump(data, f, indent=4)
+                print(f"Salvataggio completato: {filename}")
+            except Exception as e:
+                print(f"Errore salvataggio: {e}")
+
+    def load_project(self):
+        filename, _ = QFileDialog.getOpenFileName(self, "Carica Fustella", "", "JSON Files (*.json)")
+        if not filename: return
+        
+        try:
+            with open(filename, 'r') as f:
+                data = json.load(f)
+            
+            # Ripristina valori numerici
+            for k, val in data.items():
+                if k in self.inputs:
+                    self.inputs[k].setText(str(val))
+            
+            # Ripristina Checkbox
+            if 'cb_f_shape' in data: self.cb_f_shape.setChecked(data['cb_f_shape'])
+            if 'cb_f_reinf' in data: self.cb_f_reinf.setChecked(data['cb_f_reinf'])
+            if 'cb_t_shape' in data: self.cb_t_shape.setChecked(data['cb_t_shape'])
+            if 'cb_t_reinf' in data: self.cb_t_reinf.setChecked(data['cb_t_reinf'])
+            if 'cb_plat'    in data: self.cb_plat.setChecked(data['cb_plat'])
+
+            # Ripristina Colori
+            if 'theme_brown' in data: THEME['gl_brown'] = tuple(data['theme_brown'])
+            if 'theme_white' in data: THEME['gl_white'] = tuple(data['theme_white'])
+
+            self.refresh()
+            print(f"Caricamento completato: {filename}")
+            
+        except Exception as e:
+            print(f"Errore caricamento: {e}")
+            traceback.print_exc()
 
     def change_color_out(self):
         # Modifica gl_brown (il materiale di base/interno)
