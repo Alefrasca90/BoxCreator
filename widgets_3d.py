@@ -16,7 +16,8 @@ class Viewer3D(QOpenGLWidget):
         self.drag_start = None
         self.transparency_mode = False
         self.camera_dist = 1400 
-        self.extra_lines = [] # Linee di debug/visualizzazione (es. sfregamento)
+        self.extra_lines = [] # Linee di debug/sfregamento (Rosse)
+        self.glue_lines = []  # Linee colla (Multicolore)
 
         # Antialiasing attivo per bordi lisci
         fmt = QSurfaceFormat()
@@ -32,8 +33,13 @@ class Viewer3D(QOpenGLWidget):
         self.update()
         
     def set_extra_lines(self, lines):
-        """Imposta linee extra da disegnare (lista di tuple (p1, p2))"""
+        """Imposta linee extra da disegnare (sfregamento, rosso)"""
         self.extra_lines = lines
+        self.update()
+
+    def set_glue_lines(self, lines):
+        """Imposta linee colla da disegnare (lista di tuple (p1, p2, color_tuple))"""
+        self.glue_lines = lines
         self.update()
 
     def update_angles(self, angles):
@@ -132,6 +138,18 @@ class Viewer3D(QOpenGLWidget):
                 glBegin(GL_POLYGON)
                 for v in face['verts']: glVertex3f(v[0], v[1], v[2])
                 glEnd()
+
+        # --- DISEGNO LINEE COLLA (Multicolore) ---
+        if self.glue_lines:
+            glDisable(GL_LIGHTING)
+            glLineWidth(3.0)
+            glBegin(GL_LINES)
+            for p1, p2, col in self.glue_lines:
+                glColor4f(col[0], col[1], col[2], 1.0)
+                glVertex3f(p1[0], p1[1], p1[2])
+                glVertex3f(p2[0], p2[1], p2[2])
+            glEnd()
+            glEnable(GL_LIGHTING)
 
         # --- DISEGNO LINEE EXTRA (Es. Sfregamento Gessetto) ---
         if self.extra_lines:

@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QScrollArea, QPushButton, QLabel, 
                                QLineEdit, QCheckBox, QTabWidget)
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor
 
 from config import THEME
 from ui_utils import CollapsibleSection
@@ -59,6 +60,9 @@ class PackagingApp(QMainWindow):
         # Traccia dello sfregamento
         self.traces = {} 
         
+        # Dati Colla
+        self.glue_lines_local = [] 
+
         self.refresh()
 
     def build_ui(self):
@@ -139,16 +143,80 @@ class PackagingApp(QMainWindow):
             off_c = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in cuts]
             off_cr = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in creases]
             
-            # Gestione offset per coppie (Coordinate, Indice)
+            # glue_lines ora è [(segment, idx, id), ...]
             off_gl = []
-            for lines, idx in glues:
+            for lines, idx, pid in glues:
                 p1, p2 = lines
                 p1_off = (p1[0]+ox, p1[1]+oy)
                 p2_off = (p2[0]+ox, p2[1]+oy)
                 off_gl.append( ([p1_off, p2_off], idx) )
             
             self.canvas_2d.set_data(off_p, off_c, off_cr, off_gl, p['L'], p['W'], 0,0,0)
+
+            # --- Preparazione Dati Colla 3D (Coordinate Locali) ---
+            self.glue_lines_local = []
+            
+            comp_map = {}
+            layout_transforms = {} 
+
+            def map_layout(node, p_pos=(0,0), p_rot=0):
+                comp_map[node.name] = node
+                my_pos, my_rot = node.get_layout_transform_2d(p_pos, p_rot)
+                layout_transforms[node.name] = (my_pos, my_rot)
+                for c in node.children: map_layout(c, my_pos, my_rot)
+            
+            if self.box_manager.root:
+                map_layout(self.box_manager.root)
+
+            glue_colors_hex = [THEME["line_glue_1"], THEME["line_glue_2"], THEME["line_glue_3"], THEME["line_glue_4"]]
+            glue_colors_rgb = []
+            for h in glue_colors_hex:
+                c = QColor(h)
+                glue_colors_rgb.append( (c.redF(), c.greenF(), c.blueF()) )
+
+            for lines, idx, pid in glues:
+                if pid in comp_map:
+                    comp = comp_map[pid]
+                    l_pos, l_rot = layout_transforms[pid]
+                    
+                    # Inversione Trasformazione Layout 2D: Global -> Local
+                    rad = math.radians(l_rot)
+                    c, s = math.cos(rad), math.sin(rad)
+                    
+                    def to_local(gpt):
+                        gx_t, gy_t = gpt[0] - l_pos[0], gpt[1] - l_pos[1]
+                        lx = gx_t * c + gy_t * s
+                        ly = -gx_t * s + gy_t * c
+                        return (lx, ly)
+                    
+                    p1_loc = to_local(lines[0])
+                    p2_loc = to_local(lines[1])
+                    
+                    self.glue_lines_local.append({
+                        'comp': comp,
+                        'p1': p1_loc,
+                        'p2': p2_loc,
+                        'col': glue_colors_rgb[idx % 4]
+                    })
+            
+            self.update_3d_glue_lines()
+
         except Exception: traceback.print_exc()
+
+    def update_3d_glue_lines(self):
+        # Calcola le posizioni 3D correnti delle linee colla
+        lines_3d = []
+        for g in self.glue_lines_local:
+            comp = g['comp']
+            tm = self.get_absolute_transform(comp)
+            
+            # Z = 0.2 per sollevarlo leggermente dalla superficie (z-fighting)
+            p1_3d = tm((g['p1'][0], g['p1'][1], 0.2)) 
+            p2_3d = tm((g['p2'][0], g['p2'][1], 0.2))
+            
+            lines_3d.append( (p1_3d, p2_3d, g['col']) )
+            
+        self.viewer_3d.set_glue_lines(lines_3d)
 
     def reset_traces(self):
         self.traces = {}
@@ -217,6 +285,7 @@ class PackagingApp(QMainWindow):
             v['angles'][v['key']] = v['prog'] * target
             
         self.viewer_3d.update_angles(v['angles'])
+        self.update_3d_glue_lines() # AGGIORNAMENTO LINEE COLLA 3D
         self.draw_traces()
 
     def get_absolute_transform(self, comp):

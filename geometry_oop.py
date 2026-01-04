@@ -325,13 +325,13 @@ class BoxManager:
                     sh_fascia = (WF - cutout) / 2
                     offset_val = (sh_fascia - t.shoulder_val) / 2
                     fl = BoxComponent(f"{t.name}_Fascia_L", sh_fascia, fh, T, t, 'leg_left', 'fasce', custom_offset=offset_val)
-                    BoxComponent("ExtL", fh, ext_w, T, fl, 'left', 'ext') 
+                    BoxComponent(f"{t.name}_ExtL", fh, ext_w, T, fl, 'left', 'ext') 
                     fr = BoxComponent(f"{t.name}_Fascia_R", sh_fascia, fh, T, t, 'leg_right', 'fasce', custom_offset=offset_val)
-                    BoxComponent("ExtR", fh, ext_w, T, fr, 'right', 'ext')
+                    BoxComponent(f"{t.name}_ExtR", fh, ext_w, T, fr, 'right', 'ext')
                 else:
                     fascia = BoxComponent(f"{t.name}_Fascia", WF, fh, T, t, 'bottom', 'fasce')
-                    BoxComponent("Ext1", fh, ext_w, T, fascia, 'left', 'ext')
-                    BoxComponent("Ext2", fh, ext_w, T, fascia, 'right', 'ext')
+                    BoxComponent(f"{t.name}_Ext1", fh, ext_w, T, fascia, 'left', 'ext')
+                    BoxComponent(f"{t.name}_Ext2", fh, ext_w, T, fascia, 'right', 'ext')
 
     def get_3d_faces(self): return self.root.get_mesh_3d() if self.root else []
     
@@ -368,6 +368,7 @@ class BoxManager:
                     if ptype == 'fianchi': is_valid = True
                     elif ptype == 'testate': is_valid = True
                     elif ptype == 'ext': is_valid = True
+                    # elif ptype == 'lembi': is_valid = True  <-- RIMOSSO
                     elif 'Reinf' in pid: is_valid = True
                     
                     if not is_valid: continue
@@ -401,15 +402,15 @@ class BoxManager:
                             # Spalla Sinistra: x < -c_half
                             seg_L_end = min(x_end, -c_half - 5.0) # Margine 5mm anche qui
                             if x_start < seg_L_end:
-                                valid_segments.append([(x_start, y_val), (seg_L_end, y_val)])
+                                valid_segments.append( ([(x_start, y_val), (seg_L_end, y_val)], pid) )
                                 
                             # Spalla Destra: x > c_half
                             seg_R_start = max(x_start, c_half + 5.0)
                             if seg_R_start < x_end:
-                                valid_segments.append([(seg_R_start, y_val), (x_end, y_val)])
+                                valid_segments.append( ([(seg_R_start, y_val), (x_end, y_val)], pid) )
                         else:
                             # Caso Standard (Testate, Lembi, o Fianchi Rettangolari)
-                            valid_segments.append([(x_start, y_val), (x_end, y_val)])
+                            valid_segments.append( ([(x_start, y_val), (x_end, y_val)], pid) )
                             
                 return valid_segments
 
@@ -484,10 +485,10 @@ class BoxManager:
             
             for i in range(4):
                 segs_top = generate_valid_segments(Ys_top[i], polys)
-                for s in segs_top: glue_lines.append((s, i))
+                for (seg, pid) in segs_top: glue_lines.append((seg, i, pid))
                 
                 segs_btm = generate_valid_segments(Ys_btm[i], polys)
-                for s in segs_btm: glue_lines.append((s, i))
+                for (seg, pid) in segs_btm: glue_lines.append((seg, i, pid))
 
         return polys, cut_lines, creases, glue_lines
 
