@@ -3,7 +3,7 @@ import math
 import traceback
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QScrollArea, QPushButton, QLabel, 
-                               QLineEdit, QCheckBox, QTabWidget)
+                               QLineEdit, QCheckBox, QTabWidget, QColorDialog)
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 
@@ -74,6 +74,22 @@ class PackagingApp(QMainWindow):
         lbl.setAlignment(Qt.AlignCenter)
         self.panel_layout.insertWidget(0, lbl)
 
+        # --- SEZIONE COLORI RICHIESTA (Nomi Scambiati) ---
+        s0 = self.add_sec("0. Aspetto & Colori", [])
+        
+        # btn_col_out ora comanda il "Colore Interno" (gl_brown) come richiesto dallo scambio
+        btn_col_out = QPushButton("🎨 Colore Interno")
+        btn_col_out.clicked.connect(self.change_color_out)
+        btn_col_out.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
+        s0.add_widget(btn_col_out)
+
+        # btn_col_in ora comanda il "Colore Esterno" (gl_white)
+        btn_col_in = QPushButton("🎨 Colore Esterno")
+        btn_col_in.clicked.connect(self.change_color_in)
+        btn_col_in.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
+        s0.add_widget(btn_col_in)
+        # -------------------------------------------------
+
         self.add_sec("1. Fondo", [("Lunghezza", "L", 400), ("Larghezza", "W", 300), ("Spessore", "thickness", 5)])
         
         s2 = self.add_sec("2. Fianchi", [("Altezza", "h_fianchi", 100)])
@@ -107,6 +123,20 @@ class PackagingApp(QMainWindow):
         btn_all.setStyleSheet("background: #FF9800; padding: 10px;")
         self.panel_layout.addWidget(btn_all)
         self.panel_layout.addStretch()
+
+    def change_color_out(self):
+        # Modifica gl_brown (il materiale di base/interno)
+        col = QColorDialog.getColor()
+        if col.isValid():
+            THEME['gl_brown'] = (col.redF(), col.greenF(), col.blueF(), 1.0)
+            self.viewer_3d.update()
+
+    def change_color_in(self):
+        # Modifica gl_white (la patinatura/esterno)
+        col = QColorDialog.getColor()
+        if col.isValid():
+            THEME['gl_white'] = (col.redF(), col.greenF(), col.blueF(), 1.0)
+            self.viewer_3d.update()
 
     def add_sec(self, title, fields):
         s = CollapsibleSection(title, self.scroll_content); self.panel_layout.addWidget(s)
