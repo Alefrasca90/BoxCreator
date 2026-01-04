@@ -11,6 +11,7 @@ from config import THEME
 from ui_utils import CollapsibleSection
 from widgets_2d import DrawingArea2D
 from widgets_3d import Viewer3D
+from widgets_table import GlueTableWidget
 from geometry_oop import BoxManager
 
 class PackagingApp(QMainWindow):
@@ -40,8 +41,10 @@ class PackagingApp(QMainWindow):
         self.tabs = QTabWidget()
         self.canvas_2d = DrawingArea2D()
         self.viewer_3d = Viewer3D()
+        self.glue_table = GlueTableWidget()
         self.tabs.addTab(self.canvas_2d, "Progetto 2D")
         self.tabs.addTab(self.viewer_3d, "Animazione 3D")
+        self.tabs.addTab(self.glue_table, "Tabella Encoder")
         layout.addWidget(self.tabs)
         
         self.chk_transp = QCheckBox("Trasparenza 3D")
@@ -137,6 +140,9 @@ class PackagingApp(QMainWindow):
             self.viewer_3d.update_angles(self.anim_vars.get('angles', {}))
             
             polys, cuts, creases, glues = self.box_manager.get_2d_diagram(p)
+
+            # Passa i dati grezzi alla tabella per il calcolo encoder
+            self.glue_table.update_data(glues, polys)
             
             ox, oy = p['L']/2 + 50, p['W']/2 + 50
             off_p = [{'coords':[(x+ox, y+oy) for x,y in poly['coords']], 'type': poly['type']} for poly in polys]
