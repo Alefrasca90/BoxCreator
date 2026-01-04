@@ -357,7 +357,7 @@ class BoxManager:
             f_cutout = p.get('fianchi_cutout_w', 0)
             
             # --- FUNZIONE GENERAZIONE SEGMENTI (CLIP & SPLIT) ---
-            def generate_valid_segments(y_val, all_polys):
+            def generate_valid_segments(y_val, all_polys, track_idx):
                 valid_segments = []
                 for poly in all_polys:
                     ptype = poly['type']
@@ -397,15 +397,20 @@ class BoxManager:
                         if ptype == 'fianchi' and p.get('fianchi_shape') == 'ferro':
                             # La zona centrale "vuota" è [-cutout/2, +cutout/2]
                             c_half = f_cutout / 2
-                            # Verifichiamo se il segmento attraversa il centro o sta sulle spalle
+                            
+                            # MODIFICA: Ripristinate le linee 1 e 2 (default 5mm)
+                            # e applicato accorciamento scambiato su linee 3 (idx 2) e 4 (idx 3)
+                            gap_ferro = 5.0
+                            if track_idx == 2: gap_ferro = 20.0
+                            elif track_idx == 3: gap_ferro = 30.0
                             
                             # Spalla Sinistra: x < -c_half
-                            seg_L_end = min(x_end, -c_half - 5.0) # Margine 5mm anche qui
+                            seg_L_end = min(x_end, -c_half - gap_ferro)
                             if x_start < seg_L_end:
                                 valid_segments.append( ([(x_start, y_val), (seg_L_end, y_val)], pid) )
                                 
                             # Spalla Destra: x > c_half
-                            seg_R_start = max(x_start, c_half + 5.0)
+                            seg_R_start = max(x_start, c_half + gap_ferro)
                             if seg_R_start < x_end:
                                 valid_segments.append( ([(seg_R_start, y_val), (x_end, y_val)], pid) )
                         else:
@@ -484,10 +489,10 @@ class BoxManager:
             Ys_btm = calculate_positions(y_btm_inner, y_btm_fianco, y_btm_reinf, y_btm_flap)
             
             for i in range(4):
-                segs_top = generate_valid_segments(Ys_top[i], polys)
+                segs_top = generate_valid_segments(Ys_top[i], polys, i)
                 for (seg, pid) in segs_top: glue_lines.append((seg, i, pid))
                 
-                segs_btm = generate_valid_segments(Ys_btm[i], polys)
+                segs_btm = generate_valid_segments(Ys_btm[i], polys, i)
                 for (seg, pid) in segs_btm: glue_lines.append((seg, i, pid))
 
         return polys, cut_lines, creases, glue_lines
