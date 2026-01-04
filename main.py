@@ -128,11 +128,19 @@ class PackagingApp(QMainWindow):
         
         # --- 5. FIANCATE ---
         s_fiancate = self.add_sec("5. Fiancate", [("Altezza", "h_fianchi", 100)])
-        self.cb_f_shape = QCheckBox("Ferro di Cavallo"); self.cb_f_shape.setChecked(True)
-        self.cb_f_shape.toggled.connect(self.refresh); s_fiancate.add_widget(self.cb_f_shape)
+        
+        # Rinomino "Ferro di Cavallo" in "Attiva Scasso" e aggiungo logica
+        self.cb_f_shape = QCheckBox("Attiva Scasso"); self.cb_f_shape.setChecked(True)
+        self.cb_f_shape.toggled.connect(self.update_fiancate_logic) # Logica UI per fiancate
+        self.cb_f_shape.toggled.connect(self.refresh)
+        s_fiancate.add_widget(self.cb_f_shape)
+        
         self.add_inps(s_fiancate, [("H Min", "fianchi_h_low", 60), ("Largh. Scasso", "fianchi_cutout_w", 220)])
+        
         self.cb_f_reinf = QCheckBox("Raddoppio"); self.cb_f_reinf.setChecked(True)
-        self.cb_f_reinf.toggled.connect(self.refresh); s_fiancate.add_widget(self.cb_f_reinf)
+        self.cb_f_reinf.toggled.connect(self.refresh)
+        s_fiancate.add_widget(self.cb_f_reinf)
+        
         self.add_inps(s_fiancate, [("H Raddoppio", "fianchi_r_h", 40)])
         
         # --- 6. PLATFORM ---
@@ -153,13 +161,21 @@ class PackagingApp(QMainWindow):
 
         # Inizializza lo stato corretto all'avvio
         self.update_testate_logic()
+        self.update_fiancate_logic()
 
     def update_testate_logic(self):
-        """Disabilita il raddoppio se lo scasso non è attivo"""
+        """Disabilita il raddoppio se lo scasso non è attivo nelle testate"""
         is_scasso_active = self.cb_t_shape.isChecked()
         self.cb_t_reinf.setEnabled(is_scasso_active)
         if not is_scasso_active:
             self.cb_t_reinf.setChecked(False)
+
+    def update_fiancate_logic(self):
+        """Disabilita il raddoppio se lo scasso non è attivo nelle fiancate"""
+        is_scasso_active = self.cb_f_shape.isChecked()
+        self.cb_f_reinf.setEnabled(is_scasso_active)
+        if not is_scasso_active:
+            self.cb_f_reinf.setChecked(False)
 
     def save_project(self):
         data = {}
@@ -213,6 +229,7 @@ class PackagingApp(QMainWindow):
             
             # Aggiorna la logica UI dopo il caricamento
             self.update_testate_logic()
+            self.update_fiancate_logic()
             self.refresh()
             print(f"Caricamento completato: {filename}")
             

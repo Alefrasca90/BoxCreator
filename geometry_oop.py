@@ -245,7 +245,11 @@ class Fianco(BoxComponent):
                 pts += [(w/2, -h + cy), (w/2 - cx, -h + cy), (w/2 - cx, -h)]
             else:
                 pts.append((w/2, -h))
-            pts += [(w/2 - sh, -h), (w/2 - sh, -hl), (-w/2 + sh, -hl), (-w/2 + sh, -h)]
+            
+            # SOLO SE FERRO: Aggiunge lo scasso centrale
+            if self.shape == 'ferro':
+                pts += [(w/2 - sh, -h), (w/2 - sh, -hl), (-w/2 + sh, -hl), (-w/2 + sh, -h)]
+            
             if self.pars.get('plat_active'):
                 fh, ext_w, T = self.pars.get('fascia_h', 30), self.pars.get('plat_flap_w', 40), self.thickness
                 cx, cy = fh + T/2, ext_w + T/2
@@ -350,6 +354,7 @@ class BoxManager:
             L, W = p['L'], p['W']
             HF = p['h_fianchi'] 
             HT = p['h_testate']
+            F = p['F']
             plat_active = p.get('platform_active', False)
             r_active = p.get('fianchi_r_active', False)
             plat_flap_w = p.get('plat_flap_w', 40)
@@ -369,7 +374,7 @@ class BoxManager:
                     if ptype == 'fianchi': is_valid = True
                     elif ptype == 'testate': is_valid = True
                     elif ptype == 'ext': is_valid = True
-                    # elif ptype == 'lembi': is_valid = True  <-- RIMOSSO
+                    # elif ptype == 'lembi': is_valid = True
                     elif 'Reinf' in pid: is_valid = True
                     
                     if not is_valid: continue
@@ -386,7 +391,8 @@ class BoxManager:
                                 intersections.append(x_int)
                     
                     intersections.sort()
-                    
+                    if not intersections: continue
+
                     # 3. Creazione Segmenti con Margine 5mm
                     for k in range(0, len(intersections)-1, 2):
                         x_start = intersections[k] + 5.0
@@ -394,74 +400,110 @@ class BoxManager:
                         
                         if x_start >= x_end: continue
                         
-                        # 4. SPLIT SU FIANCATE FERRO DI CAVALLO (Separazione Spalle)
-                        if ptype == 'fianchi' and p.get('fianchi_shape') == 'ferro':
+                        # 4. SPLIT SU FIANCATE (Separazione Spalle + Lunghezza Lembo F + Scalatura Gap)
+                        if ptype == 'fianchi':
+                            # Determina il GAP (Scalatura) in base alla traccia (già deciso: 5, 5, 20, 30)
+                            gap_val = 5.0
+                            if track_idx == 2: gap_val = 20.0
+                            elif track_idx == 3: gap_val = 30.0
+                            
                             # La zona centrale "vuota" è [-cutout/2, +cutout/2]
                             c_half = f_cutout / 2
                             
-                            # MODIFICA: Ripristinate le linee 1 e 2 (default 5mm)
-                            # e applicato accorciamento scambiato su linee 3 (idx 2) e 4 (idx 3)
-                            gap_ferro = 5.0
-                            if track_idx == 2: gap_ferro = 20.0
-                            elif track_idx == 3: gap_ferro = 30.0
+                            # --- LIMITI FISICI TEORICI BASATI SU F (Lunghezza Lembi) ---
+                            # Il limite esterno è determinato dalla geometria TEORICA della fiancata (L), non dallo scasso.
+                            # Le fiancate sono centrate su X=0 e larghe L.
+                            # Bordo Sinistro Teorico = -L/2. Bordo Destro Teorico = +L/2.
+                            # Limite Sinistro Validità = -L/2 + F - gap_val
+                            # Limite Destro Validità = +L/2 - F + gap_val
                             
-                            # Spalla Sinistra: x < -c_half
-                            seg_L_end = min(x_end, -c_half - gap_ferro)
-                            if x_start < seg_L_end:
-                                valid_segments.append( ([(x_start, y_val), (seg_L_end, y_val)], pid) )
+                            limit_left_max = -L/2 + F - gap_val
+                            limit_right_min = L/2 - F + gap_val
+
+                            # --- LIMITI SCASSO CENTRALE (Solo se FERRO) ---
+                            use_center_limit = (p.get('fianchi_shape') == 'ferro')
+                            limit_center_L = -c_half - gap_val
+                            limit_center_R = c_half + gap_val
+                            
+                            # Spalla Sinistra
+                            actual_L_end = limit_left_max
+                            if use_center_limit:
+                                actual_L_end = min(actual_L_end, limit_center_L)
+                            
+                            # Clip al segmento fisico (x_end)
+                            # Se lo scasso (platform) ha spostato x_start in avanti, il tratto sarà corto
+                            # e finirà comunque a limit_left_max.
+                            actual_L_end = min(x_end, actual_L_end)
+                            
+                            if x_start < actual_L_end:
+                                valid_segments.append( ([(x_start, y_val), (actual_L_end, y_val)], pid) )
                                 
-                            # Spalla Destra: x > c_half
-                            seg_R_start = max(x_start, c_half + gap_ferro)
-                            if seg_R_start < x_end:
-                                valid_segments.append( ([(seg_R_start, y_val), (x_end, y_val)], pid) )
+                            # Spalla Destra
+                            actual_R_start = limit_right_min
+                            if use_center_limit:
+                                actual_R_start = max(actual_R_start, limit_center_R)
+                            
+                            actual_R_start = max(x_start, actual_R_start)
+                            
+                            if actual_R_start < x_end:
+                                valid_segments.append( ([(actual_R_start, y_val), (x_end, y_val)], pid) )
                         else:
                             # Caso Standard (Testate, Lembi, o Fianchi Rettangolari)
                             valid_segments.append( ([(x_start, y_val), (x_end, y_val)], pid) )
                             
                 return valid_segments
 
-            # --- CALCOLO POSIZIONI Y (Priorità Esterno, Cascata) ---
+            # --- CALCOLO POSIZIONI Y ---
             def calculate_positions(limit_inner, limit_fianco, limit_reinf, limit_flap):
                 direction = 1 if limit_inner > limit_fianco else -1
                 candidates = []
                 
-                # GRUPPO 1: RADDOPPI/FIANCATA (Priorità 1)
                 l_outer = limit_reinf if limit_reinf is not None else limit_fianco
-                t1 = l_outer + (5 * direction)
-                t2 = t1 + (15 * direction)
-                candidates.append(t1)
-                candidates.append(t2)
                 
-                # GRUPPO 2: LEMBI PLATFORM (Priorità 2)
-                if limit_flap is not None:
+                # SE PIATTAFORMA DISATTIVATA OPPURE RADDOPPI DISATTIVATI: DISTRIBUZIONE EQUA
+                if limit_flap is None or limit_reinf is None:
+                    # Margini: 5mm da esterno, 15mm da interno (piega)
+                    p_start = l_outer + (5 * direction)
+                    p_end = limit_inner - (15 * direction)
+                    
+                    # Step per 4 linee equamente distribuite
+                    step = (p_end - p_start) / 3.0
+                    candidates = [p_start + (step * i) for i in range(4)]
+                
+                else:
+                    # LOGICA STANDARD CON PRIORITÀ (SOLO SE C'È SIA PLATFORM CHE RADDOPPI)
+                    # GRUPPO 1: RADDOPPI/FIANCATA (Priorità 1)
+                    t1 = l_outer + (5 * direction)
+                    t2 = t1 + (15 * direction)
+                    candidates.append(t1)
+                    candidates.append(t2)
+                    
+                    # GRUPPO 2: LEMBI PLATFORM (Priorità 2)
                     t3 = limit_flap + (5 * direction)
                     t4 = t3 + (15 * direction)
                     candidates.append(t3)
                     candidates.append(t4)
-                
-                while len(candidates) < 4:
-                     candidates.append(candidates[-1] + (15 * direction))
+                    
+                    if direction == 1: candidates.sort()
+                    else: candidates.sort(reverse=True)
+                    
+                    merged = []
+                    if candidates:
+                        merged.append(candidates[0])
+                        for c in candidates[1:]:
+                            if abs(c - merged[-1]) > 2.0: merged.append(c)
+                    candidates = merged
+                    
+                    while len(candidates) < 4:
+                         candidates.append(candidates[-1] + (15 * direction))
 
-                # Sort Outer->Inner
-                if direction == 1: candidates.sort()
-                else: candidates.sort(reverse=True)
-                
-                # Merge
-                merged = []
-                if candidates:
-                    merged.append(candidates[0])
-                    for c in candidates[1:]:
-                        if abs(c - merged[-1]) > 2.0: merged.append(c)
-                
-                final_y = merged[:4]
-                while len(final_y) < 4: final_y.append(final_y[-1] + (15 * direction))
+                final_y = candidates[:4]
 
-                # Spaziatura 10mm
+                # Spaziatura Minima e Safe Limit (Post-processing)
                 for i in range(1, 4):
                     prev, curr = final_y[i-1], final_y[i]
                     if abs(curr - prev) < 10.0: final_y[i] = prev + (10 * direction)
                 
-                # Vincolo Fondo (Min 15mm)
                 limit_safe = limit_inner - (15 * direction)
                 if (final_y[3] - limit_safe) * direction > 0:
                     final_y[3] = limit_safe
