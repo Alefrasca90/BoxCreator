@@ -320,7 +320,8 @@ class BoxManager:
             
             if p.get('platform_active'):
                 fh, ext_w = p.get('fascia_h', 30), p.get('plat_flap_w', 30)
-                if pt['r_active'] and st == 'ferro':
+                # MODIFICA: Dividi fasce se c'è lo scasso (ferro), indipendentemente dal raddoppio
+                if st == 'ferro':
                     cutout = t.pars['cutout_w']
                     sh_fascia = (WF - cutout) / 2
                     offset_val = (sh_fascia - t.shoulder_val) / 2

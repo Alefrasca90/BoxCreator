@@ -75,10 +75,7 @@ class PackagingApp(QMainWindow):
         lbl.setAlignment(Qt.AlignCenter)
         self.panel_layout.insertWidget(0, lbl)
 
-        # --- SEZIONE 0: FILE & COLORI ---
-        s0 = self.add_sec("0. Gestione File & Colori", [])
-        
-        # Pulsanti Salva / Carica
+        # --- PULSANTI SALVA / CARICA (Fuori dalla fisarmonica) ---
         h_file = QHBoxLayout()
         btn_save = QPushButton("💾 Salva"); btn_save.clicked.connect(self.save_project)
         btn_save.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
@@ -87,48 +84,64 @@ class PackagingApp(QMainWindow):
         h_file.addWidget(btn_save); h_file.addWidget(btn_load)
         
         w_file = QWidget(); w_file.setLayout(h_file)
-        s0.add_widget(w_file)
-
-        # Pulsanti Colore
+        self.panel_layout.addWidget(w_file)
+        
+        # --- 1. CARTONE (Colori + Spessore) ---
+        s_cartone = self.add_sec("1. Cartone", [("Spessore", "thickness", 5)])
+        
+        # Pulsanti Colore dentro la sezione Cartone
         h_col = QHBoxLayout()
         btn_col_out = QPushButton("🎨 Interno") # gl_brown
         btn_col_out.clicked.connect(self.change_color_out)
-        btn_col_out.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
+        btn_col_out.setStyleSheet(f"background: {THEME['bg_draw']}; color: {THEME['fg_text']}; padding: 6px; border: 1px solid #555;")
         
         btn_col_in = QPushButton("🎨 Esterno") # gl_white
         btn_col_in.clicked.connect(self.change_color_in)
-        btn_col_in.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
+        btn_col_in.setStyleSheet(f"background: {THEME['bg_draw']}; color: {THEME['fg_text']}; padding: 6px; border: 1px solid #555;")
+        
         h_col.addWidget(btn_col_out); h_col.addWidget(btn_col_in)
-        
         w_col = QWidget(); w_col.setLayout(h_col)
-        s0.add_widget(w_col)
-        # --------------------------------
+        s_cartone.add_widget(w_col)
 
-        self.add_sec("1. Fondo", [("Lunghezza", "L", 400), ("Larghezza", "W", 300), ("Spessore", "thickness", 5)])
+        # --- 2. DIMENSIONI SCATOLA ---
+        self.add_sec("2. Dimensioni Scatola", [("Lunghezza", "L", 400), ("Larghezza", "W", 300)])
         
-        s2 = self.add_sec("2. Fianchi", [("Altezza", "h_fianchi", 100)])
-        self.cb_f_shape = QCheckBox("Ferro di Cavallo"); self.cb_f_shape.setChecked(True)
-        self.cb_f_shape.toggled.connect(self.refresh); s2.add_widget(self.cb_f_shape)
-        self.add_inps(s2, [("H Min", "fianchi_h_low", 60), ("Largh. Scasso", "fianchi_cutout_w", 220)])
-        self.cb_f_reinf = QCheckBox("Raddoppio"); self.cb_f_reinf.setChecked(True)
-        self.cb_f_reinf.toggled.connect(self.refresh); s2.add_widget(self.cb_f_reinf)
-        self.add_inps(s2, [("H Raddoppio", "fianchi_r_h", 40)])
+        # --- 3. LEMBI INTERNI ---
+        self.add_sec("3. Lembi Interni", [("Lunghezza", "F", 120)])
+
+        # --- 4. TESTATE (LOGICA AGGIORNATA) ---
+        s_testate = self.add_sec("4. Testate", [("Altezza", "h_testate", 100)])
         
-        s3 = self.add_sec("3. Testate", [("Altezza", "h_testate", 100)])
-        self.cb_t_shape = QCheckBox("Ferro di Cavallo"); self.cb_t_shape.setChecked(True)
-        self.cb_t_shape.toggled.connect(self.refresh); s3.add_widget(self.cb_t_shape)
-        self.add_inps(s3, [("H Min", "testate_h_low", 60), ("Largh. Scasso", "testate_cutout_w", 180)])
+        # Rinomino "Ferro di Cavallo" in "Attiva Scasso"
+        self.cb_t_shape = QCheckBox("Attiva Scasso"); self.cb_t_shape.setChecked(True)
+        self.cb_t_shape.toggled.connect(self.update_testate_logic) # Nuova logica UI
+        self.cb_t_shape.toggled.connect(self.refresh)
+        s_testate.add_widget(self.cb_t_shape)
+        
+        self.add_inps(s_testate, [("H Min", "testate_h_low", 60), ("Largh. Scasso", "testate_cutout_w", 180)])
+        
         self.cb_t_reinf = QCheckBox("Raddoppio"); self.cb_t_reinf.setChecked(True)
-        self.cb_t_reinf.toggled.connect(self.refresh); s3.add_widget(self.cb_t_reinf)
-        self.add_inps(s3, [("H Raddoppio", "testate_r_h", 30)])
+        self.cb_t_reinf.toggled.connect(self.refresh)
+        s_testate.add_widget(self.cb_t_reinf)
         
-        s4 = self.add_sec("4. Platform", [])
+        self.add_inps(s_testate, [("H Raddoppio", "testate_r_h", 30)])
+        
+        # --- 5. FIANCATE ---
+        s_fiancate = self.add_sec("5. Fiancate", [("Altezza", "h_fianchi", 100)])
+        self.cb_f_shape = QCheckBox("Ferro di Cavallo"); self.cb_f_shape.setChecked(True)
+        self.cb_f_shape.toggled.connect(self.refresh); s_fiancate.add_widget(self.cb_f_shape)
+        self.add_inps(s_fiancate, [("H Min", "fianchi_h_low", 60), ("Largh. Scasso", "fianchi_cutout_w", 220)])
+        self.cb_f_reinf = QCheckBox("Raddoppio"); self.cb_f_reinf.setChecked(True)
+        self.cb_f_reinf.toggled.connect(self.refresh); s_fiancate.add_widget(self.cb_f_reinf)
+        self.add_inps(s_fiancate, [("H Raddoppio", "fianchi_r_h", 40)])
+        
+        # --- 6. PLATFORM ---
+        s_plat = self.add_sec("6. Platform", [])
         self.cb_plat = QCheckBox("Attiva"); self.cb_plat.setChecked(True)
-        self.cb_plat.toggled.connect(self.refresh); s4.add_widget(self.cb_plat)
-        self.add_inps(s4, [("H Fascia", "fascia_h", 35), ("W Lembo", "plat_flap_w", 40)])
+        self.cb_plat.toggled.connect(self.refresh); s_plat.add_widget(self.cb_plat)
+        self.add_inps(s_plat, [("Larghezza Fasce", "fascia_h", 35), ("Lunghezza Lembi", "plat_flap_w", 40)])
         
-        self.add_sec("5. Lembi", [("Lunghezza", "F", 120)])
-        
+        # --- Pulsanti Animazione ---
         btn_step = QPushButton("▶ STEP"); btn_step.clicked.connect(self.anim_step)
         btn_step.setStyleSheet(f"background: {THEME['line_crease']}; padding: 10px;")
         self.panel_layout.addWidget(btn_step)
@@ -137,6 +150,16 @@ class PackagingApp(QMainWindow):
         btn_all.setStyleSheet("background: #FF9800; padding: 10px;")
         self.panel_layout.addWidget(btn_all)
         self.panel_layout.addStretch()
+
+        # Inizializza lo stato corretto all'avvio
+        self.update_testate_logic()
+
+    def update_testate_logic(self):
+        """Disabilita il raddoppio se lo scasso non è attivo"""
+        is_scasso_active = self.cb_t_shape.isChecked()
+        self.cb_t_reinf.setEnabled(is_scasso_active)
+        if not is_scasso_active:
+            self.cb_t_reinf.setChecked(False)
 
     def save_project(self):
         data = {}
@@ -187,7 +210,9 @@ class PackagingApp(QMainWindow):
             # Ripristina Colori
             if 'theme_brown' in data: THEME['gl_brown'] = tuple(data['theme_brown'])
             if 'theme_white' in data: THEME['gl_white'] = tuple(data['theme_white'])
-
+            
+            # Aggiorna la logica UI dopo il caricamento
+            self.update_testate_logic()
             self.refresh()
             print(f"Caricamento completato: {filename}")
             
