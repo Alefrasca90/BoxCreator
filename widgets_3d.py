@@ -175,16 +175,17 @@ class Viewer3D(QOpenGLWidget):
             draw_glue()
 
         # --- DISEGNO LINEE EXTRA (Es. Sfregamento Gessetto) ---
-        if self.extra_lines:
-            glDisable(GL_LIGHTING)
-            glLineWidth(2.5)
-            glColor4f(1.0, 0.2, 0.2, 1.0) # Rosso Gessetto
-            glBegin(GL_LINES)
-            for p1, p2 in self.extra_lines:
-                glVertex3f(p1[0], p1[1], p1[2])
-                glVertex3f(p2[0], p2[1], p2[2])
-            glEnd()
-            glEnable(GL_LIGHTING)
+        # NASCOSTO SU RICHIESTA UTENTE
+        # if self.extra_lines:
+        #     glDisable(GL_LIGHTING)
+        #     glLineWidth(2.5)
+        #     glColor4f(1.0, 0.2, 0.2, 1.0) # Rosso Gessetto
+        #     glBegin(GL_LINES)
+        #     for p1, p2 in self.extra_lines:
+        #         glVertex3f(p1[0], p1[1], p1[2])
+        #         glVertex3f(p2[0], p2[1], p2[2])
+        #     glEnd()
+        #     glEnable(GL_LIGHTING)
 
     def draw_glue_dome(self, p1, p2, normal):
         """
