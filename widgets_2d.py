@@ -106,11 +106,15 @@ class ParameterPanel(QWidget):
         self.inp_W = self._make_spin(200, 10, 2000)
         self.inp_T = self._make_spin(5, 1, 20)
         self.inp_F = self._make_spin(85, 10, 200) 
+        self.chk_lembi_angle = QCheckBox("Angolo (3 Sezioni)")
+        self.chk_lembi_angle.setStyleSheet("color: white;")
+        self.chk_lembi_angle.stateChanged.connect(self.emit_change)
         
         form_dim.addRow("Lunghezza (L):", self.inp_L)
         form_dim.addRow("Larghezza (W):", self.inp_W)
         form_dim.addRow("Spessore (T):", self.inp_T)
         form_dim.addRow("Lembi Incolla (F):", self.inp_F)
+        form_dim.addRow(self.chk_lembi_angle)
         gb_dim.setLayout(form_dim)
         vbox.addWidget(gb_dim)
 
@@ -225,6 +229,7 @@ class ParameterPanel(QWidget):
             'W': self.inp_W.value(),
             'thickness': self.inp_T.value(),
             'F': self.inp_F.value(),
+            'lembi_angle': self.chk_lembi_angle.isChecked(),
             
             # Fianchi
             'h_fianchi': self.fianchi_panel['h'].value(),

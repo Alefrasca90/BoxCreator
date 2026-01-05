@@ -244,7 +244,13 @@ class PackagingApp(QMainWindow):
         self.add_sec("2. Dimensioni Scatola", [("Lunghezza", "L", 400), ("Larghezza", "W", 300)])
         
         # --- 3. LEMBI INTERNI ---
-        self.add_sec("3. Lembi Interni", [("Lunghezza", "F", 120)])
+        # Catturo la sezione ritornata da add_sec per aggiungere la checkbox
+        s_lembi = self.add_sec("3. Lembi Interni", [("Lunghezza", "F", 120)])
+        
+        self.cb_lembi_angle = QCheckBox("Angolo (3 Sezioni)")
+        self.cb_lembi_angle.setStyleSheet(f"color: {THEME['fg_text']}")
+        self.cb_lembi_angle.toggled.connect(self.refresh)
+        s_lembi.add_widget(self.cb_lembi_angle)
 
         # --- 4. TESTATE ---
         s_testate = self.add_sec("4. Testate", [("Altezza", "h_testate", 100)])
@@ -319,6 +325,7 @@ class PackagingApp(QMainWindow):
         data['cb_t_shape'] = self.cb_t_shape.isChecked()
         data['cb_t_reinf'] = self.cb_t_reinf.isChecked()
         data['cb_plat']    = self.cb_plat.isChecked()
+        data['cb_lembi_angle'] = self.cb_lembi_angle.isChecked() # Salva stato Angolo
         
         data['theme_brown'] = THEME['gl_brown']
         data['theme_white'] = THEME['gl_white']
@@ -349,6 +356,7 @@ class PackagingApp(QMainWindow):
             if 'cb_t_shape' in data: self.cb_t_shape.setChecked(data['cb_t_shape'])
             if 'cb_t_reinf' in data: self.cb_t_reinf.setChecked(data['cb_t_reinf'])
             if 'cb_plat'    in data: self.cb_plat.setChecked(data['cb_plat'])
+            if 'cb_lembi_angle' in data: self.cb_lembi_angle.setChecked(data['cb_lembi_angle']) # Carica stato Angolo
 
             if 'theme_brown' in data: THEME['gl_brown'] = tuple(data['theme_brown'])
             if 'theme_white' in data: THEME['gl_white'] = tuple(data['theme_white'])
@@ -402,6 +410,7 @@ class PackagingApp(QMainWindow):
         p['testate_shape'] = 'ferro' if self.cb_t_shape.isChecked() else 'rect'
         p['testate_r_active'] = self.cb_t_reinf.isChecked() 
         p['platform_active'] = self.cb_plat.isChecked()
+        p['lembi_angle'] = self.cb_lembi_angle.isChecked() # Passa parametro al manager
         
         try:
             self.box_manager.build(p)

@@ -287,6 +287,32 @@ class Testata(BoxComponent):
             
         self.polygon = round_poly(pts, 2.0)
 
+class Lembo(BoxComponent):
+    def __init__(self, name, w, h, t, p, edge, is_angle=False):
+        self.is_angle = is_angle
+        # Nella logica BoxComponent:
+        # width = dimensione parallela all'attacco (lunghezza lungo il lato della scatola)
+        # height = dimensione perpendicolare (estensione del lembo F)
+        
+        # Se is_angle=True, dividiamo l'estensione (h) in 3 sezioni consecutive.
+        actual_h = h / 3.0 if is_angle else h 
+        
+        super().__init__(name, w, actual_h, t, p, edge, 'lembi')
+        
+        if self.is_angle:
+            # Creiamo la catena: Self -> Sec2 -> Sec3
+            # Sec2 si attacca al 'bottom' di Self (che è l'estremità esterna)
+            # Sec3 si attacca al 'bottom' di Sec2
+            
+            sec2 = BoxComponent(f"{name}_2", w, actual_h, t, self, 'bottom', 'lembi')
+            sec3 = BoxComponent(f"{name}_3", w, actual_h, t, sec2, 'bottom', 'lembi')
+
+    def generate_shape(self):
+        # Forma standard rettangolare (modificata solo nelle dimensioni dal costruttore)
+        w, h = self.width, self.height
+        pts = [(w/2, 0), (w/2, -h), (-w/2, -h), (-w/2, 0)]
+        self.polygon = round_poly(pts, 2.0)
+
 class BoxManager:
     def __init__(self): self.root = None
     
@@ -318,9 +344,10 @@ class BoxManager:
         tr = Testata("Testata_R", WT, HT, T, self.root, 'right', st, pt)
         
         # LEMBI E PIATTAFORMA
+        is_angle = p.get('lembi_angle', False)
         for t in [tl, tr]:
-            l1 = BoxComponent(f"{t.name}_L1", HL, F, T, t, 'left', 'lembi'); l1.fold_axis = 'y'
-            l2 = BoxComponent(f"{t.name}_L2", HL, F, T, t, 'right', 'lembi'); l2.fold_axis = 'y'
+            l1 = Lembo(f"{t.name}_L1", HL, F, T, t, 'left', is_angle=is_angle); l1.fold_axis = 'y'
+            l2 = Lembo(f"{t.name}_L2", HL, F, T, t, 'right', is_angle=is_angle); l2.fold_axis = 'y'
             
             if p.get('platform_active'):
                 fh, ext_w = p.get('fascia_h', 30), p.get('plat_flap_w', 30)
@@ -348,7 +375,29 @@ class BoxManager:
         for poly in polys:
             pts = poly['coords']
             for i in range(len(pts)): cut_lines.append([pts[i], pts[(i+1)%len(pts)]])
+        
+        # --- FILTRO LINEE DI TAGLIO (Per opzione "One Unit") ---
+        # Se una linea di taglio coincide con una linea di cordonatura, 
+        # significa che è una linea interna tra sezioni. La rimuoviamo dai tagli.
+        final_cuts = []
+        for p1, p2 in cut_lines:
+            is_overlap = False
+            for cp1, cp2 in creases:
+                # Controlla se il segmento p1-p2 corrisponde a cp1-cp2 (o inverso)
+                # Tolleranza 1.0 per float error
+                d1 = math.hypot(p1[0]-cp1[0], p1[1]-cp1[1])
+                d2 = math.hypot(p2[0]-cp2[0], p2[1]-cp2[1])
+                
+                d3 = math.hypot(p1[0]-cp2[0], p1[1]-cp2[1])
+                d4 = math.hypot(p2[0]-cp1[0], p2[1]-cp1[1])
+                
+                if (d1 < 1.0 and d2 < 1.0) or (d3 < 1.0 and d4 < 1.0):
+                    is_overlap = True
+                    break
             
+            if not is_overlap:
+                final_cuts.append([p1, p2])
+
         glue_lines = []
         if p:
             L, W = p['L'], p['W']
@@ -539,7 +588,7 @@ class BoxManager:
                 segs_btm = generate_valid_segments(Ys_btm[i], polys, i)
                 for (seg, pid) in segs_btm: glue_lines.append((seg, i, pid))
 
-        return polys, cut_lines, creases, glue_lines
+        return polys, final_cuts, creases, glue_lines
 
     def set_angles(self, angles):
         def visit(n):
