@@ -5,6 +5,7 @@ def round_poly(points, radius=2.0, steps=3):
     """Arrotonda gli angoli di un poligono usando curve di Bezier."""
     if len(points) < 3:
         return points
+    
     new_points = []
     n = len(points)
     
@@ -25,8 +26,11 @@ def round_poly(points, radius=2.0, steps=3):
             new_points.append(p_curr)
             continue
             
-        v1_x, v1_y = p_prev[0]-p_curr[0], p_prev[1]-p_curr[1]
-        v2_x, v2_y = p_next[0]-p_curr[0], p_next[1]-p_curr[1]
+        v1_x = p_prev[0] - p_curr[0]
+        v1_y = p_prev[1] - p_curr[1]
+        v2_x = p_next[0] - p_curr[0]
+        v2_y = p_next[1] - p_curr[1]
+        
         d1 = math.hypot(v1_x, v1_y)
         d2 = math.hypot(v2_x, v2_y)
         
@@ -77,7 +81,8 @@ class BoxComponent:
 
     def add_child(self, child, edge):
         self.children.append(child)
-        gw, gh = self.width, self.height
+        gw = self.width
+        gh = self.height
         
         if self.name == "Fondo":
             if edge == 'top':
@@ -162,28 +167,39 @@ class BoxComponent:
         child.generate_shape()
 
     def generate_shape(self):
-        w, h = self.width, self.height
+        w = self.width
+        h = self.height
         pts = [(w/2, 0), (w/2, -h), (-w/2, -h), (-w/2, 0)]
         self.polygon = round_poly(pts, 2.0)
 
     def _make_transform(self, parent_tm, angle_override=None):
         angle = self.fold_angle if angle_override is None else angle_override
         rf = math.radians(angle * self.fold_multiplier)
-        cf, sf = math.cos(rf), math.sin(rf)
+        cf = math.cos(rf)
+        sf = math.sin(rf)
         rp = math.radians(self.pre_rot_z)
-        cp, sp = math.cos(rp), math.sin(rp)
+        cp = math.cos(rp)
+        sp = math.sin(rp)
         
         def local_tm(v):
             x, y, z = v
-            rx, ry = x*cp - y*sp, x*sp + y*cp
+            rx = x*cp - y*sp
+            ry = x*sp + y*cp
             rz = z
+            
             if self.fold_axis == 'x': 
-                yf, zf, xf = ry*cf - rz*sf, ry*sf + rz*cf, rx
+                yf = ry*cf - rz*sf
+                zf = ry*sf + rz*cf
+                xf = rx
             else: 
-                xf, zf, yf = rx*cf + rz*sf, -rx*sf + rz*cf, ry
+                xf = rx*cf + rz*sf
+                zf = -rx*sf + rz*cf
+                yf = ry
+                
             return (xf + self.pivot_3d[0], yf + self.pivot_3d[1], zf + self.pivot_3d[2])
             
-        if parent_tm is None: return lambda v: local_tm(v)
+        if parent_tm is None:
+            return lambda v: local_tm(v)
         return lambda v: parent_tm(local_tm(v))
 
     def get_world_transform_3d(self, parent_tm=None):
@@ -194,11 +210,14 @@ class BoxComponent:
         faces = []
         vt = [tm((x,y,0)) for x,y in self.polygon]
         vb = [tm((x,y,-self.thickness)) for x,y in self.polygon]
+        
         faces.append({'verts': vt, 'type': 'front', 'name': self.name, 'col': 'cardboard'})     
         faces.append({'verts': vb, 'type': 'back', 'name': self.name, 'col': 'white'}) 
+        
         n = len(self.polygon)
         for i in range(n):
             faces.append({'verts': [vt[i], vt[(i+1)%n], vb[(i+1)%n], vb[i]], 'type': 'side', 'name': self.name})
+            
         if self.parent:
             faces.extend(self._get_hinge_mesh(parent_tm))
         for c in self.children:
@@ -214,12 +233,14 @@ class BoxComponent:
         current_angle = self.fold_angle
         prev_v_left = None
         prev_v_right = None
+        
         for i in range(steps + 1):
             t = i / steps
             interp_angle = current_angle * t
             tm_step = self._make_transform(parent_tm, angle_override=interp_angle)
             curr_v_left = tm_step(p_left_child)
             curr_v_right = tm_step(p_right_child)
+            
             if prev_v_left is not None:
                 faces.append({
                     'verts': [prev_v_left, curr_v_left, curr_v_right, prev_v_right],
@@ -231,7 +252,8 @@ class BoxComponent:
 
     def get_layout_transform_2d(self, parent_pos=(0,0), parent_rot=0):
         rad = math.radians(parent_rot)
-        rc, rs = math.cos(rad), math.sin(rad)
+        rc = math.cos(rad)
+        rs = math.sin(rad)
         lox, loy = self.layout_pos
         go_x = lox * rc - loy * rs
         go_y = lox * rs + loy * rc
@@ -240,50 +262,65 @@ class BoxComponent:
     def get_layout_2d(self, parent_pos=(0,0), parent_rot=0):
         my_pos, my_rot = self.get_layout_transform_2d(parent_pos, parent_rot)
         rad = math.radians(my_rot)
-        c, s = math.cos(rad), math.sin(rad)
+        c = math.cos(rad)
+        s = math.sin(rad)
         
-        def to_g(pt): return (pt[0]*c - pt[1]*s + my_pos[0], pt[0]*s + pt[1]*c + my_pos[1])
+        def to_g(pt):
+            return (pt[0]*c - pt[1]*s + my_pos[0], pt[0]*s + pt[1]*c + my_pos[1])
 
         gp = []
-        for x, y in self.polygon: gp.append(to_g((x,y)))
+        for x, y in self.polygon:
+            gp.append(to_g((x,y)))
         data = [{'coords': gp, 'type': self.label, 'id': self.name}]
         
         creases = []
-        w = self.width; p1, p2 = (w/2, 0), (-w/2, 0)
-        if self.parent: creases.append([to_g(p1), to_g(p2)])
+        w = self.width
+        p1 = (w/2, 0)
+        p2 = (-w/2, 0)
+        if self.parent:
+            creases.append([to_g(p1), to_g(p2)])
         
         for ch in self.children:
             d, cr = ch.get_layout_2d(my_pos, my_rot)
-            data.extend(d); creases.extend(cr)
+            data.extend(d)
+            creases.extend(cr)
             
         return data, creases
 
 class Fondo(BoxComponent):
     def generate_shape(self):
-        w, h = self.width, self.height
+        w = self.width
+        h = self.height
         pts = [(-w/2, -h/2), (w/2, -h/2), (w/2, h/2), (-w/2, h/2)]
         self.polygon = round_poly(pts, 2.0)
 
 class Fianco(BoxComponent):
     def __init__(self, name, w, h, t, p, edge, shape='rect', pars={}):
-        self.shape = shape; self.pars = pars
+        self.shape = shape
+        self.pars = pars
         cutout_w = pars.get('cutout_w', w/2)
         self.shoulder_val = max(0, (w - cutout_w) / 2)
         self.h_low_val = pars.get('h_low', h*0.6)
         super().__init__(name, w, h, t, p, edge, 'fianchi')
         if self.pars.get('r_active'):
-            r_h = self.pars.get('r_h', 30); rw = w - 2*self.shoulder_val
+            r_h = self.pars.get('r_h', 30)
+            rw = w - 2*self.shoulder_val
             BoxComponent(f"{name}_Reinf", rw, r_h, t, self, 'reinf_attach', 'lembi')
 
     def generate_shape(self):
-        w, h = self.width, self.height
+        w = self.width
+        h = self.height
         pts = []
         if self.shape == 'ferro' or self.pars.get('plat_active'):
-            sh, hl = self.shoulder_val, self.h_low_val
+            sh = self.shoulder_val
+            hl = self.h_low_val
             pts = [(w/2, 0)]
             if self.pars.get('plat_active'):
-                fh, ext_w, T = self.pars.get('fascia_h', 30), self.pars.get('plat_flap_w', 40), self.thickness
-                cx, cy = fh + T/2, ext_w + T/2
+                fh = self.pars.get('fascia_h', 30)
+                ext_w = self.pars.get('plat_flap_w', 40)
+                T = self.thickness
+                cx = fh + T/2
+                cy = ext_w + T/2
                 pts += [(w/2, -h + cy), (w/2 - cx, -h + cy), (w/2 - cx, -h)]
             else:
                 pts.append((w/2, -h))
@@ -293,8 +330,11 @@ class Fianco(BoxComponent):
                 pts += [(w/2 - sh, -h), (w/2 - sh, -hl), (-w/2 + sh, -hl), (-w/2 + sh, -h)]
             
             if self.pars.get('plat_active'):
-                fh, ext_w, T = self.pars.get('fascia_h', 30), self.pars.get('plat_flap_w', 40), self.thickness
-                cx, cy = fh + T/2, ext_w + T/2
+                fh = self.pars.get('fascia_h', 30)
+                ext_w = self.pars.get('plat_flap_w', 40)
+                T = self.thickness
+                cx = fh + T/2
+                cy = ext_w + T/2
                 pts += [(-w/2 + cx, -h), (-w/2 + cx, -h + cy), (-w/2, -h + cy)]
             else:
                 pts.append((-w/2, -h))
@@ -306,20 +346,24 @@ class Fianco(BoxComponent):
 
 class Testata(BoxComponent):
     def __init__(self, name, w, h, t, p, edge, shape='rect', pars={}):
-        self.shape = shape; self.pars = pars
+        self.shape = shape
+        self.pars = pars
         cutout_w = pars.get('cutout_w', w/2)
         self.shoulder_val = max(0, (w - cutout_w) / 2)
         self.h_low_val = pars.get('h_low', h*0.6)
         super().__init__(name, w, h, t, p, edge, 'testate')
         if self.pars.get('r_active'):
-            r_h = self.pars.get('r_h', 30); rw = w - 2*self.shoulder_val
+            r_h = self.pars.get('r_h', 30)
+            rw = w - 2*self.shoulder_val
             BoxComponent(f"{name}_Reinf", rw, r_h, t, self, 'reinf_attach', 'lembi')
 
     def generate_shape(self):
-        w, h = self.width, self.height
+        w = self.width
+        h = self.height
         pts = []
         if self.shape == 'ferro':
-            sh, hl = self.shoulder_val, self.h_low_val
+            sh = self.shoulder_val
+            hl = self.h_low_val
             pts = [
                 (w/2, 0), (w/2, -h), (w/2 - sh, -h), (w/2 - sh, -hl),
                 (-w/2 + sh, -hl), (-w/2 + sh, -h), (-w/2, -h), (-w/2, 0)
@@ -338,13 +382,15 @@ class Lembo(BoxComponent):
         if self.is_angle:
             # Recupera i parametri 
             h_tot = h
-            h1 = angle_pars.get('h', h_tot/3.0) # Sezione 1 (Vicino) - "Altezza Angolo"
-            h3 = angle_pars.get('b', h_tot/3.0) # Sezione 3 (Estremità) - "Base Angolo"
+            # MODIFICA: Sottrai lo spessore 't' alle dimensioni dei cateti
+            # h1 = altezza angolo (Sezione 1)
+            # h3 = base angolo (Sezione 3)
+            h1 = max(0.1, angle_pars.get('h', 40.0) - t)
+            h3 = max(0.1, angle_pars.get('b', 40.0) - t)
             
-            # Calcola l'ipotenusa
-            h2 = h_tot - h1 - h3 
-            if h2 < 1.0: 
-                h1 = h2 = h3 = h_tot/3.0 # Fallback se i parametri sono impossibili
+            # Calcola l'ipotenusa (Pitagora) E sottrai lo spessore 't'
+            # questo permette alla base di "appoggiarsi" senza compenetrare o restare troppo alta
+            h2 = max(0.1, math.hypot(h1, h3) - t)
             
             # Assegna h1 a 'self' (Sezione 1)
             actual_h = h1
@@ -359,17 +405,22 @@ class Lembo(BoxComponent):
             sec3 = BoxComponent(f"{name}_3", w, h3, t, sec2, 'bottom', 'lembi')
 
     def generate_shape(self):
-        w, h = self.width, self.height
+        w = self.width
+        h = self.height
         pts = [(w/2, 0), (w/2, -h), (-w/2, -h), (-w/2, 0)]
         self.polygon = round_poly(pts, 2.0)
 
 class BoxManager:
-    def __init__(self): self.root = None
+    def __init__(self): 
+        self.root = None
     
     def build(self, p):
-        L, W = p['L'], p['W']
+        L = p['L']
+        W = p['W']
         T = p.get('thickness', 5.0)
-        HF, HT, F = p['h_fianchi'], p['h_testate'], p['F']
+        HF = p['h_fianchi']
+        HT = p['h_testate']
+        F = p['F']
         
         WT = W - (2 * T)
         WF = W 
@@ -379,16 +430,26 @@ class BoxManager:
         self.root = Fondo("Fondo", L, W, T, None, None, 'fondo')
         
         # FIANCHI
-        pf = {'cutout_w': p.get('fianchi_cutout_w', L/2), 'h_low': p.get('fianchi_h_low', 0),
-              'r_active': p.get('fianchi_r_active', False), 'r_h': p.get('fianchi_r_h', 30),
-              'plat_active': p.get('platform_active', False), 'fascia_h': p.get('fascia_h', 30), 'plat_flap_w': p.get('plat_flap_w', 40)}
+        pf = {
+            'cutout_w': p.get('fianchi_cutout_w', L/2), 
+            'h_low': p.get('fianchi_h_low', 0),
+            'r_active': p.get('fianchi_r_active', False), 
+            'r_h': p.get('fianchi_r_h', 30),
+            'plat_active': p.get('platform_active', False), 
+            'fascia_h': p.get('fascia_h', 30), 
+            'plat_flap_w': p.get('plat_flap_w', 40)
+        }
         sf = p['fianchi_shape']
         Fianco("Fianco_T", LF, HF, T, self.root, 'top', sf, pf)
         Fianco("Fianco_B", LF, HF, T, self.root, 'bottom', sf, pf)
         
         # TESTATE
-        pt = {'cutout_w': p.get('testate_cutout_w', W/2), 'h_low': p.get('testate_h_low', 0),
-              'r_active': p.get('testate_r_active', False), 'r_h': p.get('testate_r_h', 30)}
+        pt = {
+            'cutout_w': p.get('testate_cutout_w', W/2), 
+            'h_low': p.get('testate_h_low', 0),
+            'r_active': p.get('testate_r_active', False), 
+            'r_h': p.get('testate_r_h', 30)
+        }
         st = p['testate_shape']
         tl = Testata("Testata_L", WT, HT, T, self.root, 'left', st, pt)
         tr = Testata("Testata_R", WT, HT, T, self.root, 'right', st, pt)
@@ -405,7 +466,9 @@ class BoxManager:
             l2.fold_axis = 'y'
             
             if p.get('platform_active'):
-                fh, ext_w = p.get('fascia_h', 30), p.get('plat_flap_w', 30)
+                fh = p.get('fascia_h', 30)
+                ext_w = p.get('plat_flap_w', 30)
+                
                 if st == 'ferro':
                     cutout = t.pars['cutout_w']
                     sh_fascia = (WF - cutout) / 2
@@ -419,18 +482,21 @@ class BoxManager:
                     BoxComponent(f"{t.name}_Ext1", fh, ext_w, T, fascia, 'left', 'ext')
                     BoxComponent(f"{t.name}_Ext2", fh, ext_w, T, fascia, 'right', 'ext')
 
-    def get_3d_faces(self): return self.root.get_mesh_3d() if self.root else []
+    def get_3d_faces(self):
+        return self.root.get_mesh_3d() if self.root else []
     
     def get_2d_diagram(self, p=None):
-        if not self.root: return [], [], [], []
+        if not self.root:
+            return [], [], [], []
         
         polys, creases = self.root.get_layout_2d()
         cut_lines = []
         for poly in polys:
             pts = poly['coords']
-            for i in range(len(pts)): cut_lines.append([pts[i], pts[(i+1)%len(pts)]])
+            for i in range(len(pts)):
+                cut_lines.append([pts[i], pts[(i+1)%len(pts)]])
         
-        # --- FILTRO LINEE DI TAGLIO (Per opzione "One Unit") ---
+        # --- FILTRO LINEE DI TAGLIO ---
         # Rimuove le linee di taglio che coincidono con le cordonature interne
         final_cuts = []
         for p1, p2 in cut_lines:
@@ -440,13 +506,17 @@ class BoxManager:
                 d2 = math.hypot(p2[0]-cp2[0], p2[1]-cp2[1])
                 d3 = math.hypot(p1[0]-cp2[0], p1[1]-cp2[1])
                 d4 = math.hypot(p2[0]-cp1[0], p2[1]-cp1[1])
+                
                 if (d1 < 1.0 and d2 < 1.0) or (d3 < 1.0 and d4 < 1.0):
-                    is_overlap = True; break
-            if not is_overlap: final_cuts.append([p1, p2])
+                    is_overlap = True
+                    break
+            if not is_overlap:
+                final_cuts.append([p1, p2])
 
         glue_lines = []
         if p:
-            L, W = p['L'], p['W']
+            L = p['L']
+            W = p['W']
             HF = p['h_fianchi'] 
             HT = p['h_testate']
             F = p['F']
@@ -468,7 +538,6 @@ class BoxManager:
                     if ptype == 'fianchi': is_valid = True
                     elif ptype == 'testate': is_valid = True
                     elif ptype == 'ext': is_valid = True
-                    # elif ptype == 'lembi': is_valid = True
                     elif 'Reinf' in pid: is_valid = True
                     
                     if not is_valid: continue
@@ -538,26 +607,33 @@ class BoxManager:
                 else:
                     t1 = l_outer + (5 * direction)
                     t2 = t1 + (15 * direction)
-                    candidates.append(t1); candidates.append(t2)
+                    candidates.append(t1)
+                    candidates.append(t2)
                     t3 = limit_flap + (5 * direction)
                     t4 = t3 + (15 * direction)
-                    candidates.append(t3); candidates.append(t4)
+                    candidates.append(t3)
+                    candidates.append(t4)
                     
-                    if direction == 1: candidates.sort()
-                    else: candidates.sort(reverse=True)
+                    if direction == 1:
+                        candidates.sort()
+                    else:
+                        candidates.sort(reverse=True)
                     
                     merged = []
                     if candidates:
                         merged.append(candidates[0])
                         for c in candidates[1:]:
-                            if abs(c - merged[-1]) > 2.0: merged.append(c)
+                            if abs(c - merged[-1]) > 2.0:
+                                merged.append(c)
                     candidates = merged
-                    while len(candidates) < 4: candidates.append(candidates[-1] + (15 * direction))
+                    while len(candidates) < 4:
+                        candidates.append(candidates[-1] + (15 * direction))
 
                 final_y = candidates[:4]
                 for i in range(1, 4):
                     prev, curr = final_y[i-1], final_y[i]
-                    if abs(curr - prev) < 10.0: final_y[i] = prev + (10 * direction)
+                    if abs(curr - prev) < 10.0:
+                        final_y[i] = prev + (10 * direction)
                 
                 limit_safe = limit_inner - (15 * direction)
                 if (final_y[3] - limit_safe) * direction > 0:
@@ -584,9 +660,12 @@ class BoxManager:
             
             for i in range(4):
                 segs_top = generate_valid_segments(Ys_top[i], polys, i)
-                for (seg, pid) in segs_top: glue_lines.append((seg, i, pid))
+                for (seg, pid) in segs_top:
+                    glue_lines.append((seg, i, pid))
+                
                 segs_btm = generate_valid_segments(Ys_btm[i], polys, i)
-                for (seg, pid) in segs_btm: glue_lines.append((seg, i, pid))
+                for (seg, pid) in segs_btm:
+                    glue_lines.append((seg, i, pid))
 
         return polys, final_cuts, creases, glue_lines
 
@@ -599,18 +678,19 @@ class BoxManager:
             elif n.label == 'ext': 
                 n.fold_angle = angles.get('ext', 0)
             elif n.label == 'lembi': 
-                # Se è la sezione 3 (fondo/base)
                 if n.name.endswith('_3'): 
                     n.fold_angle = angles.get('lembi_3', 0)
-                # Se è la sezione 2 (ipotenusa)
                 elif n.name.endswith('_2'): 
                     n.fold_angle = angles.get('lembi_2', 0)
-                # Altrimenti è l'attacco
                 else: 
                     n.fold_angle = angles.get('lembi', 0)
             elif n.label == 'testate': 
                 n.fold_angle = angles.get('testate', 0)
             elif n.label == 'fianchi': 
                 n.fold_angle = angles.get('fianchi', 0)
-            for c in n.children: visit(c)
-        if self.root: visit(self.root)
+            
+            for c in n.children:
+                visit(c)
+        
+        if self.root:
+            visit(self.root)

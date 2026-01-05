@@ -2,6 +2,7 @@ import sys
 import math
 import traceback
 import json
+import time  # Import necessario per il Delta Time
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QScrollArea, QPushButton, QLabel, 
                                QLineEdit, QCheckBox, QTabWidget, QColorDialog, QFileDialog, QFrame)
@@ -26,72 +27,62 @@ class PackagingApp(QMainWindow):
 
         main_w = QWidget()
         self.setCentralWidget(main_w)
-        # Layout principale contiene solo le Tab
+        
         self.main_layout = QVBoxLayout(main_w)
         self.main_layout.setContentsMargins(0,0,0,0)
 
-        # Inizializzazione Widget Core
         self.canvas_2d = DrawingArea2D()
         self.viewer_3d = Viewer3D()
         self.glue_table = GlueTableWidget()
         
-        self.inputs = {} # Dizionario per gli input numerici
-        self.step_checks = {} # Dizionario per le checkbox animazione
+        self.inputs = {} 
+        self.step_checks = {} 
         
-        # Setup TabWidget
+        # Variabile Velocità Animazione (Default 1.0x)
+        self.anim_speed_val = 1.0
+        
+        # Cache per ottimizzare le performance 3D
+        self.tm_cache = {} 
+        self.last_time = 0.0
+
         self.tabs = QTabWidget()
         
-        # --- TAB 1: Fustellato (Parametri + 2D) ---
         self.tab_fustellato = self.build_tab_fustellato()
         self.tabs.addTab(self.tab_fustellato, "Fustellato")
         
-        # --- TAB 2: Vista 3D (Controlli 3D + Viewer) ---
         self.tab_3d = self.build_tab_3d()
         self.tabs.addTab(self.tab_3d, "Vista 3D")
         
-        # --- TAB 3: Tratti Colla ---
         self.tabs.addTab(self.glue_table, "Tratti Colla")
         
         self.main_layout.addWidget(self.tabs)
         
-        # --- SISTEMA ANIMAZIONE ---
-        # Stato corrente degli angoli (per transizioni fluide)
-        # Aggiunte chiavi per le parti dell'angolo: lembi_3 (base), lembi_2 (ipotenusa)
         self.current_angles = {
-            'lembi': 0.0, 'lembi_3': 0.0, 'lembi_2': 0.0,
+            'lembi': 0.0, 'lembi_3': 0.0, 'lembi_2': 0.0, 
             'testate': 0.0, 'fianchi': 0.0,
             'fasce': 0.0, 'ext': 0.0, 'reinf': 0.0
         }
-        # Target manuali (impostati dalle checkbox)
         self.manual_targets = self.current_angles.copy()
 
-        # Timer Sequenza Automatica ("Animazione")
         self.anim_vars = {'prog': 0.0, 'running': False}
         self.timer_seq = QTimer()
         self.timer_seq.timeout.connect(self.update_sequence_frame)
         
-        # Timer Animazione Manuale (Checkbox)
         self.timer_manual = QTimer()
         self.timer_manual.timeout.connect(self.update_manual_frame)
         
-        # Traccia dello sfregamento
         self.traces = {} 
-        
-        # Dati Colla
         self.glue_lines_local = [] 
 
-        # Inizializzazione logica UI e refresh
         self.update_testate_logic()
         self.update_fiancate_logic()
         self.refresh()
 
     def build_tab_fustellato(self):
-        """Costruisce il contenuto del primo tab: Parametri a sinistra, 2D a destra."""
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0,0,0,0)
         
-        # --- Pannello Laterale (ScrollArea) ---
         scroll = QScrollArea()
         scroll.setFixedWidth(400)
         scroll.setWidgetResizable(True)
@@ -102,21 +93,17 @@ class PackagingApp(QMainWindow):
         self.params_layout.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.params_content)
         
-        # Costruisci i controlli dei parametri dentro params_layout
         self.build_params_ui()
         
         layout.addWidget(scroll)
         layout.addWidget(self.canvas_2d)
-        
         return container
 
     def build_tab_3d(self):
-        """Costruisce il contenuto del secondo tab: Controlli 3D a sinistra, Viewer a destra."""
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0,0,0,0)
         
-        # --- Pannello Laterale 3D ---
         sidebar = QWidget()
         sidebar.setFixedWidth(250)
         sidebar.setStyleSheet("background-color: #2b2b2b; border-right: 1px solid #444;")
@@ -125,32 +112,66 @@ class PackagingApp(QMainWindow):
         v_layout.setSpacing(15)
         v_layout.setContentsMargins(10, 20, 10, 20)
         
-        # Label Titolo
         lbl = QLabel("CONTROLLI 3D")
         lbl.setStyleSheet(f"color: {THEME['highlight']}; font-weight: bold; font-size: 14px;")
         lbl.setAlignment(Qt.AlignCenter)
         v_layout.addWidget(lbl)
         
-        # Trasparenza
         self.chk_transp = QCheckBox("Trasparenza")
         self.chk_transp.setStyleSheet(f"color: {THEME['fg_text']}; font-size: 14px;")
         self.chk_transp.toggled.connect(self.viewer_3d.set_transparency)
         v_layout.addWidget(self.chk_transp)
         
-        # Separatore
-        line = QFrame(); line.setFrameShape(QFrame.HLine); line.setFrameShadow(QFrame.Sunken); line.setStyleSheet("color: #555;")
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        line.setStyleSheet("color: #555;")
         v_layout.addWidget(line)
         
-        # --- SEZIONE ANIMAZIONE ---
+        # --- SEZIONE VELOCITÀ ---
+        lbl_spd = QLabel("Velocità Animazione")
+        lbl_spd.setStyleSheet(f"color: {THEME['fg_text']}; font-weight: bold;")
+        lbl_spd.setAlignment(Qt.AlignCenter)
+        v_layout.addWidget(lbl_spd)
+
+        h_speed = QHBoxLayout()
+        btn_minus = QPushButton("-")
+        btn_minus.setFixedSize(30, 30)
+        btn_minus.setStyleSheet("background: #444; color: white; border-radius: 15px; font-weight: bold;")
+        btn_minus.clicked.connect(self.decrease_speed)
+        
+        self.lbl_speed_val = QLabel(f"{self.anim_speed_val:.1f}x")
+        self.lbl_speed_val.setStyleSheet(f"color: {THEME['highlight']}; font-weight: bold; font-size: 14px;")
+        self.lbl_speed_val.setAlignment(Qt.AlignCenter)
+        
+        btn_plus = QPushButton("+")
+        btn_plus.setFixedSize(30, 30)
+        btn_plus.setStyleSheet("background: #444; color: white; border-radius: 15px; font-weight: bold;")
+        btn_plus.clicked.connect(self.increase_speed)
+        
+        h_speed.addWidget(btn_minus)
+        h_speed.addWidget(self.lbl_speed_val)
+        h_speed.addWidget(btn_plus)
+        
+        w_speed = QWidget()
+        w_speed.setLayout(h_speed)
+        v_layout.addWidget(w_speed)
+
+        line_spd = QFrame()
+        line_spd.setFrameShape(QFrame.HLine)
+        line_spd.setFrameShadow(QFrame.Sunken)
+        line_spd.setStyleSheet("color: #555;")
+        v_layout.addWidget(line_spd)
+
+        # --- SEZIONE ANIMAZIONE MANUALE ---
         lbl_anim = QLabel("Controllo Manuale")
         lbl_anim.setStyleSheet(f"color: {THEME['fg_text']}; font-weight: bold;")
         v_layout.addWidget(lbl_anim)
 
-        # Checkbox per gli Step (Controllo Manuale Indipendente)
         steps_info = [
             ("1. Lembi Incollaggio", "lembi"),
             ("   -> Angolo: Base", "lembi_3"),      
-            ("   -> Angolo: Ipo.", "lembi_2"),     
+            ("   -> Angolo: Ipo.", "lembi_2"),      
             ("2. Testate", "testate"),
             ("3. Fiancate", "fianchi"),
             ("4. Fasce Platform", "fasce"),
@@ -160,24 +181,23 @@ class PackagingApp(QMainWindow):
 
         for label_text, key in steps_info:
             cb = QCheckBox(label_text)
-            cb.setChecked(False) # Default disattivo
+            cb.setChecked(False)
             cb.setStyleSheet(f"color: {THEME['fg_text']}; margin-left: 10px;")
-            # Collega il segnale per l'aggiornamento manuale
             cb.toggled.connect(self.on_manual_checkbox_toggle)
             self.step_checks[key] = cb
             v_layout.addWidget(cb)
-
-            # Nascondi inizialmente i sotto-step dell'angolo
             if key in ['lembi_2', 'lembi_3']:
                 cb.setVisible(False)
 
         v_layout.addSpacing(15)
         
-        line2 = QFrame(); line2.setFrameShape(QFrame.HLine); line2.setFrameShadow(QFrame.Sunken); line2.setStyleSheet("color: #555;")
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.HLine)
+        line2.setFrameShadow(QFrame.Sunken)
+        line2.setStyleSheet("color: #555;")
         v_layout.addWidget(line2)
 
-        # Pulsante Animazione (Sequence)
-        self.btn_anim = QPushButton("Animazione")
+        self.btn_anim = QPushButton("Animazione Auto")
         self.btn_anim.clicked.connect(self.toggle_sequence_animation)
         self.btn_anim.setStyleSheet("background: #FF9800; padding: 10px; color: white; font-weight: bold;")
         v_layout.addWidget(self.btn_anim)
@@ -189,35 +209,44 @@ class PackagingApp(QMainWindow):
         
         return container
 
+    def increase_speed(self):
+        self.anim_speed_val += 0.25
+        if self.anim_speed_val > 5.0: self.anim_speed_val = 5.0
+        self.lbl_speed_val.setText(f"{self.anim_speed_val:.1f}x")
+
+    def decrease_speed(self):
+        self.anim_speed_val -= 0.25
+        if self.anim_speed_val < 0.25: self.anim_speed_val = 0.25
+        self.lbl_speed_val.setText(f"{self.anim_speed_val:.1f}x")
+
     def build_params_ui(self):
-        """Popola la sidebar dei parametri (usata nel Tab 1)."""
-        
-        # --- PULSANTI SALVA / CARICA ---
         h_file = QHBoxLayout()
-        btn_save = QPushButton("💾 Salva"); btn_save.clicked.connect(self.save_project)
+        btn_save = QPushButton("💾 Salva")
+        btn_save.clicked.connect(self.save_project)
         btn_save.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
-        btn_load = QPushButton("📂 Carica"); btn_load.clicked.connect(self.load_project)
-        btn_load.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
-        h_file.addWidget(btn_save); h_file.addWidget(btn_load)
         
-        w_file = QWidget(); w_file.setLayout(h_file)
+        btn_load = QPushButton("📂 Carica")
+        btn_load.clicked.connect(self.load_project)
+        btn_load.setStyleSheet(f"background: {THEME['bg_panel']}; color: {THEME['fg_text']}; padding: 8px; border: 1px solid #555;")
+        
+        h_file.addWidget(btn_save)
+        h_file.addWidget(btn_load)
+        
+        w_file = QWidget()
+        w_file.setLayout(h_file)
         self.params_layout.addWidget(w_file)
 
-        # --- LABEL PARAMETRI ---
         lbl = QLabel("PARAMETRI")
         lbl.setStyleSheet(f"color: {THEME['highlight']}; font-size: 16px; font-weight: bold; padding: 20px;")
         lbl.setAlignment(Qt.AlignCenter)
         self.params_layout.addWidget(lbl)
         
-        # --- 1. CARTONE (Colori + Spessore) ---
         s_cartone = self.add_sec("1. Cartone", [("Spessore", "thickness", 5)])
         
-        # --- SELEZIONE COLORI ---
         v_cols = QVBoxLayout()
         v_cols.setSpacing(10)
         v_cols.setContentsMargins(5, 5, 5, 5)
 
-        # Riga 1: Lato Interno
         h_int = QHBoxLayout()
         lbl_int = QLabel("Colore Lato Interno")
         lbl_int.setStyleSheet(f"color: {THEME['fg_text']}")
@@ -230,7 +259,6 @@ class PackagingApp(QMainWindow):
         h_int.addStretch()
         v_cols.addLayout(h_int)
 
-        # Riga 2: Lato Esterno
         h_ext = QHBoxLayout()
         lbl_ext = QLabel("Colore Lato Esterno")
         lbl_ext.setStyleSheet(f"color: {THEME['fg_text']}")
@@ -243,15 +271,14 @@ class PackagingApp(QMainWindow):
         h_ext.addStretch()
         v_cols.addLayout(h_ext)
 
-        w_col = QWidget(); w_col.setLayout(v_cols)
+        w_col = QWidget()
+        w_col.setLayout(v_cols)
         s_cartone.add_widget(w_col)
         
         self.update_color_buttons()
 
-        # --- 2. DIMENSIONI SCATOLA ---
         self.add_sec("2. Dimensioni Scatola", [("Lunghezza", "L", 400), ("Larghezza", "W", 300)])
         
-        # --- 3. LEMBI INTERNI ---
         s_lembi = self.add_sec("3. Lembi Interni", [("Lunghezza Totale (F)", "F", 120)])
         
         self.cb_lembi_angle = QCheckBox("Angolo (3 Sezioni)")
@@ -260,71 +287,84 @@ class PackagingApp(QMainWindow):
         self.cb_lembi_angle.toggled.connect(self.refresh)
         s_lembi.add_widget(self.cb_lembi_angle)
 
-        # --- Aggiunta Input Parametri Angolo (Inizialmente Nascosti) ---
-        self.w_ang_h = QWidget(); hl_h = QHBoxLayout(self.w_ang_h); hl_h.setContentsMargins(0,2,0,2)
-        lbl_ang_h = QLabel("H Angolo (S1)"); lbl_ang_h.setFixedWidth(100); lbl_ang_h.setStyleSheet(f"color:{THEME['fg_text']}")
-        self.inputs['angle_h'] = QLineEdit("40"); self.inputs['angle_h'].setStyleSheet("background:#555; color:white; border:none;")
+        self.w_ang_h = QWidget()
+        hl_h = QHBoxLayout(self.w_ang_h)
+        hl_h.setContentsMargins(0,2,0,2)
+        lbl_ang_h = QLabel("H Angolo (S1)")
+        lbl_ang_h.setFixedWidth(100)
+        lbl_ang_h.setStyleSheet(f"color:{THEME['fg_text']}")
+        self.inputs['angle_h'] = QLineEdit("40")
+        self.inputs['angle_h'].setStyleSheet("background:#555; color:white; border:none;")
         self.inputs['angle_h'].textChanged.connect(self.refresh)
-        hl_h.addWidget(lbl_ang_h); hl_h.addWidget(self.inputs['angle_h'])
+        hl_h.addWidget(lbl_ang_h)
+        hl_h.addWidget(self.inputs['angle_h'])
         s_lembi.add_widget(self.w_ang_h)
 
-        self.w_ang_b = QWidget(); hl_b = QHBoxLayout(self.w_ang_b); hl_b.setContentsMargins(0,2,0,2)
-        lbl_ang_b = QLabel("Base Angolo (S3)"); lbl_ang_b.setFixedWidth(100); lbl_ang_b.setStyleSheet(f"color:{THEME['fg_text']}")
-        self.inputs['angle_b'] = QLineEdit("40"); self.inputs['angle_b'].setStyleSheet("background:#555; color:white; border:none;")
+        self.w_ang_b = QWidget()
+        hl_b = QHBoxLayout(self.w_ang_b)
+        hl_b.setContentsMargins(0,2,0,2)
+        lbl_ang_b = QLabel("Base Angolo (S3)")
+        lbl_ang_b.setFixedWidth(100)
+        lbl_ang_b.setStyleSheet(f"color:{THEME['fg_text']}")
+        self.inputs['angle_b'] = QLineEdit("40")
+        self.inputs['angle_b'].setStyleSheet("background:#555; color:white; border:none;")
         self.inputs['angle_b'].textChanged.connect(self.refresh)
-        hl_b.addWidget(lbl_ang_b); hl_b.addWidget(self.inputs['angle_b'])
+        hl_b.addWidget(lbl_ang_b)
+        hl_b.addWidget(self.inputs['angle_b'])
         s_lembi.add_widget(self.w_ang_b)
 
         self.toggle_angle_inputs()
 
-        # --- 4. TESTATE ---
         s_testate = self.add_sec("4. Testate", [("Altezza", "h_testate", 100)])
         
-        self.cb_t_shape = QCheckBox("Attiva Scasso"); self.cb_t_shape.setChecked(True)
+        self.cb_t_shape = QCheckBox("Attiva Scasso")
+        self.cb_t_shape.setChecked(True)
         self.cb_t_shape.toggled.connect(self.update_testate_logic) 
         self.cb_t_shape.toggled.connect(self.refresh)
         s_testate.add_widget(self.cb_t_shape)
         
         self.add_inps(s_testate, [("H Min", "testate_h_low", 60), ("Largh. Scasso", "testate_cutout_w", 180)])
         
-        self.cb_t_reinf = QCheckBox("Raddoppio"); self.cb_t_reinf.setChecked(True)
+        self.cb_t_reinf = QCheckBox("Raddoppio")
+        self.cb_t_reinf.setChecked(True)
         self.cb_t_reinf.toggled.connect(self.refresh)
         s_testate.add_widget(self.cb_t_reinf)
         
         self.add_inps(s_testate, [("H Raddoppio", "testate_r_h", 30)])
         
-        # --- 5. FIANCATE ---
         s_fiancate = self.add_sec("5. Fiancate", [("Altezza", "h_fianchi", 100)])
         
-        self.cb_f_shape = QCheckBox("Attiva Scasso"); self.cb_f_shape.setChecked(True)
+        self.cb_f_shape = QCheckBox("Attiva Scasso")
+        self.cb_f_shape.setChecked(True)
         self.cb_f_shape.toggled.connect(self.update_fiancate_logic) 
         self.cb_f_shape.toggled.connect(self.refresh)
         s_fiancate.add_widget(self.cb_f_shape)
         
         self.add_inps(s_fiancate, [("H Min", "fianchi_h_low", 60), ("Largh. Scasso", "fianchi_cutout_w", 220)])
         
-        self.cb_f_reinf = QCheckBox("Raddoppio"); self.cb_f_reinf.setChecked(True)
+        self.cb_f_reinf = QCheckBox("Raddoppio")
+        self.cb_f_reinf.setChecked(True)
         self.cb_f_reinf.toggled.connect(self.refresh)
         s_fiancate.add_widget(self.cb_f_reinf)
         
         self.add_inps(s_fiancate, [("H Raddoppio", "fianchi_r_h", 40)])
         
-        # --- 6. PLATFORM ---
         s_plat = self.add_sec("6. Platform", [])
-        self.cb_plat = QCheckBox("Attiva"); self.cb_plat.setChecked(True)
-        self.cb_plat.toggled.connect(self.refresh); s_plat.add_widget(self.cb_plat)
+        self.cb_plat = QCheckBox("Attiva")
+        self.cb_plat.setChecked(True)
+        self.cb_plat.toggled.connect(self.refresh)
+        s_plat.add_widget(self.cb_plat)
+        
         self.add_inps(s_plat, [("Larghezza Fasce", "fascia_h", 35), ("Lunghezza Lembi", "plat_flap_w", 40)])
         
         self.params_layout.addStretch()
 
     def toggle_angle_inputs(self):
-        """Mostra/Nasconde i campi dell'angolo in base alla checkbox."""
         show = self.cb_lembi_angle.isChecked()
         self.w_ang_h.setVisible(show)
         self.w_ang_b.setVisible(show)
 
     def update_color_buttons(self):
-        """Aggiorna il colore di sfondo dei pulsanti."""
         def to_css_rgb(rgba):
             r, g, b = int(rgba[0]*255), int(rgba[1]*255), int(rgba[2]*255)
             return f"background-color: rgb({r},{g},{b}); border: 1px solid #888; border-radius: 3px;"
@@ -372,7 +412,8 @@ class PackagingApp(QMainWindow):
 
     def load_project(self):
         filename, _ = QFileDialog.getOpenFileName(self, "Carica Fustella", "", "JSON Files (*.json)")
-        if not filename: return
+        if not filename:
+            return
         
         try:
             with open(filename, 'r') as f:
@@ -435,6 +476,37 @@ class PackagingApp(QMainWindow):
         try: return float(self.inputs[k].text())
         except: return 0.0
 
+    def calculate_triangle_targets(self):
+        try:
+            t = self.get_val('thickness')
+            h_raw = self.get_val('angle_h')
+            b_raw = self.get_val('angle_b')
+            
+            # Dimensioni nette
+            h = max(0.1, h_raw - t)
+            b = max(0.1, b_raw - t)
+            
+            hypotenuse = math.hypot(h, b)
+            
+            if hypotenuse <= h: 
+                return 90.0, 90.0
+            
+            ratio = h / hypotenuse
+            if ratio > 1.0: 
+                ratio = 1.0
+            
+            angle_b_rad = math.acos(ratio)
+            angle_b_deg = math.degrees(angle_b_rad)
+            
+            t2 = 180.0 - angle_b_deg
+            
+            angle_c_deg = 90.0 - angle_b_deg
+            t3 = 180.0 - angle_c_deg
+            
+            return t2, t3
+        except:
+            return 90.0, 90.0
+
     def refresh(self):
         p = {k: self.get_val(k) for k in self.inputs}
         p['fianchi_shape'] = 'ferro' if self.cb_f_shape.isChecked() else 'rect'
@@ -446,7 +518,6 @@ class PackagingApp(QMainWindow):
         p['angle_h'] = self.get_val('angle_h')
         p['angle_b'] = self.get_val('angle_b')
         
-        # --- GESTIONE VISIBILITÀ CHECKBOX 3D ---
         is_angle = p['lembi_angle']
         if 'lembi_2' in self.step_checks:
             self.step_checks['lembi_2'].setVisible(is_angle)
@@ -457,7 +528,6 @@ class PackagingApp(QMainWindow):
             self.box_manager.build(p)
             self.viewer_3d.set_scene(self.box_manager)
             
-            # Applica lo stato corrente degli angoli (che sia manuale o sequenza)
             self.viewer_3d.update_angles(self.current_angles)
             
             polys, cuts, creases, glues = self.box_manager.get_2d_diagram(p)
@@ -465,6 +535,7 @@ class PackagingApp(QMainWindow):
             self.glue_table.update_data(glues, polys)
             
             ox, oy = p['L']/2 + 50, p['W']/2 + 50
+            
             off_p = [{'coords':[(x+ox, y+oy) for x,y in poly['coords']], 'type': poly['type']} for poly in polys]
             off_c = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in cuts]
             off_cr = [[(p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy)] for p1,p2 in creases]
@@ -472,9 +543,7 @@ class PackagingApp(QMainWindow):
             off_gl = []
             for lines, idx, pid in glues:
                 p1, p2 = lines
-                p1_off = (p1[0]+ox, p1[1]+oy)
-                p2_off = (p2[0]+ox, p2[1]+oy)
-                off_gl.append( ([p1_off, p2_off], idx) )
+                off_gl.append( ([ (p1[0]+ox, p1[1]+oy), (p2[0]+ox, p2[1]+oy) ], idx) )
             
             self.canvas_2d.set_data(off_p, off_c, off_cr, off_gl, p['L'], p['W'], 0,0,0)
 
@@ -487,7 +556,8 @@ class PackagingApp(QMainWindow):
                 comp_map[node.name] = node
                 my_pos, my_rot = node.get_layout_transform_2d(p_pos, p_rot)
                 layout_transforms[node.name] = (my_pos, my_rot)
-                for c in node.children: map_layout(c, my_pos, my_rot)
+                for c in node.children:
+                    map_layout(c, my_pos, my_rot)
             
             if self.box_manager.root:
                 map_layout(self.box_manager.root)
@@ -498,35 +568,28 @@ class PackagingApp(QMainWindow):
                 if pid in comp_map:
                     comp = comp_map[pid]
                     l_pos, l_rot = layout_transforms[pid]
-                    
-                    rad = math.radians(l_rot)
-                    c, s = math.cos(rad), math.sin(rad)
-                    
+                    rad = math.radians(l_rot); c, s = math.cos(rad), math.sin(rad)
                     def to_local(gpt):
-                        gx_t, gy_t = gpt[0] - l_pos[0], gpt[1] - l_pos[1]
-                        lx = gx_t * c + gy_t * s
-                        ly = -gx_t * s + gy_t * c
-                        return (lx, ly)
-                    
-                    p1_loc = to_local(lines[0])
-                    p2_loc = to_local(lines[1])
+                        gx_t = gpt[0] - l_pos[0]
+                        gy_t = gpt[1] - l_pos[1]
+                        return (gx_t * c + gy_t * s, -gx_t * s + gy_t * c)
                     
                     self.glue_lines_local.append({
                         'comp': comp,
-                        'p1': p1_loc,
-                        'p2': p2_loc,
+                        'p1': to_local(lines[0]),
+                        'p2': to_local(lines[1]),
                         'col': glue_color_gray
                     })
             
             self.update_3d_glue_lines()
 
-        except Exception: traceback.print_exc()
+        except Exception:
+            traceback.print_exc()
 
     def update_3d_glue_lines(self):
         lines_3d = []
         for g in self.glue_lines_local:
-            comp = g['comp']
-            tm = self.get_absolute_transform(comp)
+            tm = self.get_absolute_transform(g['comp'])
             
             p1_3d = tm((g['p1'][0], g['p1'][1], 0.2)) 
             p2_3d = tm((g['p2'][0], g['p2'][1], 0.2))
@@ -549,18 +612,12 @@ class PackagingApp(QMainWindow):
         self.traces = {}
         self.viewer_3d.set_extra_lines([])
 
-    # --- LOGICA MANUALE (CHECKBOX) ---
     def on_manual_checkbox_toggle(self):
-        """Chiamato quando si clicca una checkbox: imposta target e avvia timer manuale."""
-        # Se sta girando la sequenza automatica, la fermiamo per dare priorità al manuale?
-        # Oppure ignoriamo? Solitamente l'utente vuole il controllo. 
-        # Fermiamo la sequenza automatica se attiva.
         if self.anim_vars['running']:
             self.timer_seq.stop()
             self.anim_vars['running'] = False
             self.reset_traces()
 
-        # Definiamo i target in base alle checkbox (INDIPENDENTE, NESSUNA COLLISIONE)
         def set_target(k, val_true, val_false=0.0):
             if self.step_checks[k].isChecked():
                 self.manual_targets[k] = val_true
@@ -568,9 +625,21 @@ class PackagingApp(QMainWindow):
                 self.manual_targets[k] = val_false
 
         set_target('lembi', 90.0)
-        # Nuovi target per le parti dell'angolo
-        set_target('lembi_3', 90.0) # Base
-        set_target('lembi_2', 90.0) # Ipotenusa
+        
+        if self.cb_lembi_angle.isChecked():
+            t2, t3 = self.calculate_triangle_targets()
+            if self.step_checks['lembi_2'].isChecked():
+                self.manual_targets['lembi_2'] = t2
+            else:
+                self.manual_targets['lembi_2'] = 0.0
+                
+            if self.step_checks['lembi_3'].isChecked():
+                self.manual_targets['lembi_3'] = t3
+            else:
+                self.manual_targets['lembi_3'] = 0.0
+        else:
+            set_target('lembi_2', 90.0)
+            set_target('lembi_3', 90.0)
         
         set_target('testate', 90.0)
         set_target('fianchi', 90.0)
@@ -578,13 +647,13 @@ class PackagingApp(QMainWindow):
         set_target('ext', 90.0)
         set_target('reinf', 180.0)
 
-        # Avvia il timer manuale per interpolare (animare) verso i target
         self.timer_manual.start(20)
 
     def update_manual_frame(self):
-        """Timer per interpolare i valori manuali verso i target."""
         all_reached = True
-        speed = 0.15 # Velocità di interpolazione (0.0 a 1.0)
+        base_speed = 0.15 
+        # Modifica velocità anche nel manuale
+        speed = base_speed * self.anim_speed_val 
 
         for key in self.current_angles:
             curr = self.current_angles[key]
@@ -593,11 +662,10 @@ class PackagingApp(QMainWindow):
             diff = targ - curr
             if abs(diff) > 0.5:
                 all_reached = False
-                # Interpolazione semplice (Lerp like)
                 new_val = curr + diff * speed
                 self.current_angles[key] = new_val
             else:
-                self.current_angles[key] = targ # Snap al target se vicino
+                self.current_angles[key] = targ
 
         self.viewer_3d.update_angles(self.current_angles)
         self.update_3d_glue_lines()
@@ -605,107 +673,119 @@ class PackagingApp(QMainWindow):
         if all_reached:
             self.timer_manual.stop()
 
-    # --- LOGICA AUTOMATICA (PULSANTE ANIMAZIONE) ---
     def toggle_sequence_animation(self):
-        """Gestisce Start/Stop/Reset della sequenza completa."""
         if self.anim_vars['running']:
-            # STOP e RESET a Zero
             self.reset_sequence_animation()
         else:
-            # Se era finita o è ferma, riparti da zero
             if self.anim_vars['prog'] >= 3.0:
                 self.anim_vars['prog'] = 0.0
-                # Riporta visivamente a zero prima di partire
                 self.current_angles = {k:0.0 for k in self.current_angles}
                 self.viewer_3d.update_angles(self.current_angles)
             
-            # START
             self.reset_traces()
             self.anim_vars.update({'prog': 0.0, 'running': True})
-            self.timer_manual.stop() # Ferma eventuali animazioni manuali
+            self.last_time = time.time() # Inizializza tempo
+            self.timer_manual.stop()
             self.timer_seq.start(20)
 
     def reset_sequence_animation(self):
-        """Ferma la sequenza e resetta a zero."""
         self.timer_seq.stop()
         self.anim_vars['running'] = False
         self.anim_vars['prog'] = 0.0
         self.reset_traces()
         
-        # Resetta angoli a 0
         self.current_angles = {k:0.0 for k in self.current_angles}
         self.viewer_3d.update_angles(self.current_angles)
         self.update_3d_glue_lines()
 
     def update_sequence_frame(self):
-        """Timer per la sequenza completa automatica."""
-        v = self.anim_vars
-        v['prog'] += 0.015
-        t = v['prog']
+        # DELTA TIME LOGIC
+        current_time = time.time()
+        dt = current_time - self.last_time
+        self.last_time = current_time
         
-        # Calcola gli angoli target per questo frame della sequenza
+        # Pulizia Cache trasformazioni ad ogni frame
+        self.tm_cache = {} 
+
+        # Avanzamento basato sul tempo (approx 0.75 units/sec = similar to original speed)
+        self.anim_vars['prog'] += 0.75 * dt * self.anim_speed_val
+        t = self.anim_vars['prog']
+        
         def lerp(t, s, e, max_a=90): 
             return 0 if t<s else (max_a if t>e else (t-s)/(e-s)*max_a)
         
-        # Calcoliamo i valori nel dizionario temporaneo
-        seq_angles = {}
-        # Sequenza base per Lembi (Standard)
-        seq_angles['lembi'] = lerp(t, 0.0, 1.0)
+        seq = {}
+        is_angle = self.cb_lembi_angle.isChecked()
         
-        # Sequenza Angolo (sfalsata: Base -> Ipotenusa)
-        # Base piega un po' dopo l'inizio del lembo principale
-        seq_angles['lembi_3'] = lerp(t, 0.2, 1.2) 
-        # Ipotenusa piega dopo la base
-        seq_angles['lembi_2'] = lerp(t, 0.4, 1.4) 
+        # 1. Lembi di Incollaggio
+        seq['lembi'] = lerp(t, 0.0, 1.0)
+        
+        t_next = 1.0 
+        
+        if is_angle:
+            t2_target, t3_target = self.calculate_triangle_targets()
+            # 2. Angolo: Base
+            seq['lembi_3'] = lerp(t, 1.0, 2.0, t3_target)
+            # 3. Angolo: Ipotenusa
+            seq['lembi_2'] = lerp(t, 2.0, 3.0, t2_target)
+            t_next = 3.0
+        else:
+            seq['lembi_3'] = 0.0
+            seq['lembi_2'] = 0.0
 
-        seq_angles['testate'] = lerp(t, 0.0, 1.0)
-        seq_angles['fianchi'] = lerp(t, 0.5, 1.0)
-        seq_angles['fasce']   = lerp(t, 1.0, 1.5)
-        seq_angles['ext']     = lerp(t, 1.5, 2.5)
-        seq_angles['reinf']   = lerp(t, 2.0, 3.0, 180)
+        # 4. Tutto il resto
+        seq['testate'] = lerp(t, t_next, t_next + 1.0)
+        seq['fianchi'] = lerp(t, t_next + 0.5, t_next + 1.5)
+        seq['fasce']   = lerp(t, t_next + 1.0, t_next + 2.0)
+        seq['ext']     = lerp(t, t_next + 1.5, t_next + 2.5)
+        seq['reinf']   = lerp(t, t_next + 2.0, t_next + 3.0, 180)
 
-        # Logica collisione Lembi nella sequenza
-        target_lembi = seq_angles['lembi']
-        rad_t = math.radians(seq_angles['testate'])
-        rad_f = math.radians(seq_angles['fianchi'])
-        if rad_t > 1.55: rad_t = 1.55
+        # Logica collisione Lembi
+        target_lembi = seq['lembi']
+        rad_t = math.radians(seq['testate'])
+        rad_f = math.radians(seq['fianchi'])
+        if rad_t > 1.55: 
+            rad_t = 1.55
         
-        min_lembo_rad = math.atan(math.tan(rad_f) / math.cos(rad_t))
-        min_lembo_deg = math.degrees(min_lembo_rad)
+        min_lembo_deg = math.degrees(math.atan(math.tan(rad_f) / math.cos(rad_t)))
+        seq['lembi'] = max(target_lembi, min_lembo_deg)
         
-        actual_lembo_deg = max(target_lembi, min_lembo_deg)
-        seq_angles['lembi'] = actual_lembo_deg
-        
-        is_pushing = (min_lembo_deg > target_lembi + 0.2)
-        if is_pushing and self.box_manager.root:
+        # Controllo collisione solo se necessario
+        if (min_lembo_deg > target_lembi + 0.2) and self.box_manager.root:
             self.record_traces()
 
-        # Aggiorna lo stato corrente globale e il viewer
-        self.current_angles = seq_angles
+        self.current_angles = seq
         self.viewer_3d.update_angles(self.current_angles)
         self.update_3d_glue_lines() 
         self.draw_traces()
 
-        if t >= 3.0: 
+        if t >= 7.0: 
             self.timer_seq.stop()
-            v['running'] = False 
-            # Sequenza finita. Rimane nell'ultimo frame.
+            self.anim_vars['running'] = False 
 
     # --- Metodi Helper ---
     def anim_step(self): pass
     def anim_all(self): pass
 
     def get_absolute_transform(self, comp):
+        # Implementazione CACHE per ottimizzazione performance
+        if comp.name in self.tm_cache:
+            return self.tm_cache[comp.name]
+
+        # Calcolo standard se non in cache
         chain = []
         curr = comp
         while curr:
             chain.append(curr)
             curr = curr.parent
-        chain.reverse() 
+        chain.reverse()
         
         tm = None 
         for c in chain:
             tm = c.get_world_transform_3d(parent_tm=tm)
+        
+        # Salva in cache
+        self.tm_cache[comp.name] = tm
         return tm
 
     def record_traces(self):
