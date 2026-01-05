@@ -56,8 +56,10 @@ class PackagingApp(QMainWindow):
         
         # --- SISTEMA ANIMAZIONE ---
         # Stato corrente degli angoli (per transizioni fluide)
+        # Aggiunte chiavi per le parti dell'angolo: lembi_3 (base), lembi_2 (ipotenusa)
         self.current_angles = {
-            'lembi': 0.0, 'testate': 0.0, 'fianchi': 0.0,
+            'lembi': 0.0, 'lembi_3': 0.0, 'lembi_2': 0.0,
+            'testate': 0.0, 'fianchi': 0.0,
             'fasce': 0.0, 'ext': 0.0, 'reinf': 0.0
         }
         # Target manuali (impostati dalle checkbox)
@@ -147,6 +149,8 @@ class PackagingApp(QMainWindow):
         # Checkbox per gli Step (Controllo Manuale Indipendente)
         steps_info = [
             ("1. Lembi Incollaggio", "lembi"),
+            ("   -> Angolo: Base", "lembi_3"),      
+            ("   -> Angolo: Ipo.", "lembi_2"),     
             ("2. Testate", "testate"),
             ("3. Fiancate", "fianchi"),
             ("4. Fasce Platform", "fasce"),
@@ -162,6 +166,10 @@ class PackagingApp(QMainWindow):
             cb.toggled.connect(self.on_manual_checkbox_toggle)
             self.step_checks[key] = cb
             v_layout.addWidget(cb)
+
+            # Nascondi inizialmente i sotto-step dell'angolo
+            if key in ['lembi_2', 'lembi_3']:
+                cb.setVisible(False)
 
         v_layout.addSpacing(15)
         
@@ -244,13 +252,30 @@ class PackagingApp(QMainWindow):
         self.add_sec("2. Dimensioni Scatola", [("Lunghezza", "L", 400), ("Larghezza", "W", 300)])
         
         # --- 3. LEMBI INTERNI ---
-        # Catturo la sezione ritornata da add_sec per aggiungere la checkbox
-        s_lembi = self.add_sec("3. Lembi Interni", [("Lunghezza", "F", 120)])
+        s_lembi = self.add_sec("3. Lembi Interni", [("Lunghezza Totale (F)", "F", 120)])
         
         self.cb_lembi_angle = QCheckBox("Angolo (3 Sezioni)")
         self.cb_lembi_angle.setStyleSheet(f"color: {THEME['fg_text']}")
+        self.cb_lembi_angle.toggled.connect(self.toggle_angle_inputs)
         self.cb_lembi_angle.toggled.connect(self.refresh)
         s_lembi.add_widget(self.cb_lembi_angle)
+
+        # --- Aggiunta Input Parametri Angolo (Inizialmente Nascosti) ---
+        self.w_ang_h = QWidget(); hl_h = QHBoxLayout(self.w_ang_h); hl_h.setContentsMargins(0,2,0,2)
+        lbl_ang_h = QLabel("H Angolo (S1)"); lbl_ang_h.setFixedWidth(100); lbl_ang_h.setStyleSheet(f"color:{THEME['fg_text']}")
+        self.inputs['angle_h'] = QLineEdit("40"); self.inputs['angle_h'].setStyleSheet("background:#555; color:white; border:none;")
+        self.inputs['angle_h'].textChanged.connect(self.refresh)
+        hl_h.addWidget(lbl_ang_h); hl_h.addWidget(self.inputs['angle_h'])
+        s_lembi.add_widget(self.w_ang_h)
+
+        self.w_ang_b = QWidget(); hl_b = QHBoxLayout(self.w_ang_b); hl_b.setContentsMargins(0,2,0,2)
+        lbl_ang_b = QLabel("Base Angolo (S3)"); lbl_ang_b.setFixedWidth(100); lbl_ang_b.setStyleSheet(f"color:{THEME['fg_text']}")
+        self.inputs['angle_b'] = QLineEdit("40"); self.inputs['angle_b'].setStyleSheet("background:#555; color:white; border:none;")
+        self.inputs['angle_b'].textChanged.connect(self.refresh)
+        hl_b.addWidget(lbl_ang_b); hl_b.addWidget(self.inputs['angle_b'])
+        s_lembi.add_widget(self.w_ang_b)
+
+        self.toggle_angle_inputs()
 
         # --- 4. TESTATE ---
         s_testate = self.add_sec("4. Testate", [("Altezza", "h_testate", 100)])
@@ -292,6 +317,12 @@ class PackagingApp(QMainWindow):
         
         self.params_layout.addStretch()
 
+    def toggle_angle_inputs(self):
+        """Mostra/Nasconde i campi dell'angolo in base alla checkbox."""
+        show = self.cb_lembi_angle.isChecked()
+        self.w_ang_h.setVisible(show)
+        self.w_ang_b.setVisible(show)
+
     def update_color_buttons(self):
         """Aggiorna il colore di sfondo dei pulsanti."""
         def to_css_rgb(rgba):
@@ -325,7 +356,7 @@ class PackagingApp(QMainWindow):
         data['cb_t_shape'] = self.cb_t_shape.isChecked()
         data['cb_t_reinf'] = self.cb_t_reinf.isChecked()
         data['cb_plat']    = self.cb_plat.isChecked()
-        data['cb_lembi_angle'] = self.cb_lembi_angle.isChecked() # Salva stato Angolo
+        data['cb_lembi_angle'] = self.cb_lembi_angle.isChecked()
         
         data['theme_brown'] = THEME['gl_brown']
         data['theme_white'] = THEME['gl_white']
@@ -356,7 +387,7 @@ class PackagingApp(QMainWindow):
             if 'cb_t_shape' in data: self.cb_t_shape.setChecked(data['cb_t_shape'])
             if 'cb_t_reinf' in data: self.cb_t_reinf.setChecked(data['cb_t_reinf'])
             if 'cb_plat'    in data: self.cb_plat.setChecked(data['cb_plat'])
-            if 'cb_lembi_angle' in data: self.cb_lembi_angle.setChecked(data['cb_lembi_angle']) # Carica stato Angolo
+            if 'cb_lembi_angle' in data: self.cb_lembi_angle.setChecked(data['cb_lembi_angle'])
 
             if 'theme_brown' in data: THEME['gl_brown'] = tuple(data['theme_brown'])
             if 'theme_white' in data: THEME['gl_white'] = tuple(data['theme_white'])
@@ -364,6 +395,7 @@ class PackagingApp(QMainWindow):
             
             self.update_testate_logic()
             self.update_fiancate_logic()
+            self.toggle_angle_inputs()
             self.refresh()
             print(f"Caricamento completato: {filename}")
             
@@ -410,7 +442,16 @@ class PackagingApp(QMainWindow):
         p['testate_shape'] = 'ferro' if self.cb_t_shape.isChecked() else 'rect'
         p['testate_r_active'] = self.cb_t_reinf.isChecked() 
         p['platform_active'] = self.cb_plat.isChecked()
-        p['lembi_angle'] = self.cb_lembi_angle.isChecked() # Passa parametro al manager
+        p['lembi_angle'] = self.cb_lembi_angle.isChecked()
+        p['angle_h'] = self.get_val('angle_h')
+        p['angle_b'] = self.get_val('angle_b')
+        
+        # --- GESTIONE VISIBILITÀ CHECKBOX 3D ---
+        is_angle = p['lembi_angle']
+        if 'lembi_2' in self.step_checks:
+            self.step_checks['lembi_2'].setVisible(is_angle)
+        if 'lembi_3' in self.step_checks:
+            self.step_checks['lembi_3'].setVisible(is_angle)
         
         try:
             self.box_manager.build(p)
@@ -520,23 +561,22 @@ class PackagingApp(QMainWindow):
             self.reset_traces()
 
         # Definiamo i target in base alle checkbox (INDIPENDENTE, NESSUNA COLLISIONE)
-        if self.step_checks['lembi'].isChecked(): self.manual_targets['lembi'] = 90.0
-        else: self.manual_targets['lembi'] = 0.0
+        def set_target(k, val_true, val_false=0.0):
+            if self.step_checks[k].isChecked():
+                self.manual_targets[k] = val_true
+            else:
+                self.manual_targets[k] = val_false
+
+        set_target('lembi', 90.0)
+        # Nuovi target per le parti dell'angolo
+        set_target('lembi_3', 90.0) # Base
+        set_target('lembi_2', 90.0) # Ipotenusa
         
-        if self.step_checks['testate'].isChecked(): self.manual_targets['testate'] = 90.0
-        else: self.manual_targets['testate'] = 0.0
-        
-        if self.step_checks['fianchi'].isChecked(): self.manual_targets['fianchi'] = 90.0
-        else: self.manual_targets['fianchi'] = 0.0
-        
-        if self.step_checks['fasce'].isChecked(): self.manual_targets['fasce'] = 90.0
-        else: self.manual_targets['fasce'] = 0.0
-        
-        if self.step_checks['ext'].isChecked(): self.manual_targets['ext'] = 90.0
-        else: self.manual_targets['ext'] = 0.0
-        
-        if self.step_checks['reinf'].isChecked(): self.manual_targets['reinf'] = 180.0
-        else: self.manual_targets['reinf'] = 0.0
+        set_target('testate', 90.0)
+        set_target('fianchi', 90.0)
+        set_target('fasce', 90.0)
+        set_target('ext', 90.0)
+        set_target('reinf', 180.0)
 
         # Avvia il timer manuale per interpolare (animare) verso i target
         self.timer_manual.start(20)
@@ -586,8 +626,7 @@ class PackagingApp(QMainWindow):
             self.timer_seq.start(20)
 
     def reset_sequence_animation(self):
-        """Ferma la sequenza e resetta a zero (o ripristina lo stato manuale?).
-           Richiesta: 'resetta a zero l'animazione'."""
+        """Ferma la sequenza e resetta a zero."""
         self.timer_seq.stop()
         self.anim_vars['running'] = False
         self.anim_vars['prog'] = 0.0
@@ -597,11 +636,6 @@ class PackagingApp(QMainWindow):
         self.current_angles = {k:0.0 for k in self.current_angles}
         self.viewer_3d.update_angles(self.current_angles)
         self.update_3d_glue_lines()
-        
-        # Opzionale: deseleziona le checkbox per coerenza visiva?
-        # self.blockSignals(True) -> uncheck -> blockSignals(False)
-        # Per ora lasciamo le checkbox come sono, ma l'utente vede il modello "chiuso" a zero.
-        # Se tocca una checkbox, ripartirà l'animazione manuale verso lo stato della checkbox.
 
     def update_sequence_frame(self):
         """Timer per la sequenza completa automatica."""
@@ -615,6 +649,15 @@ class PackagingApp(QMainWindow):
         
         # Calcoliamo i valori nel dizionario temporaneo
         seq_angles = {}
+        # Sequenza base per Lembi (Standard)
+        seq_angles['lembi'] = lerp(t, 0.0, 1.0)
+        
+        # Sequenza Angolo (sfalsata: Base -> Ipotenusa)
+        # Base piega un po' dopo l'inizio del lembo principale
+        seq_angles['lembi_3'] = lerp(t, 0.2, 1.2) 
+        # Ipotenusa piega dopo la base
+        seq_angles['lembi_2'] = lerp(t, 0.4, 1.4) 
+
         seq_angles['testate'] = lerp(t, 0.0, 1.0)
         seq_angles['fianchi'] = lerp(t, 0.5, 1.0)
         seq_angles['fasce']   = lerp(t, 1.0, 1.5)
@@ -622,7 +665,7 @@ class PackagingApp(QMainWindow):
         seq_angles['reinf']   = lerp(t, 2.0, 3.0, 180)
 
         # Logica collisione Lembi nella sequenza
-        target_lembi = lerp(t, 0.0, 1.0)
+        target_lembi = seq_angles['lembi']
         rad_t = math.radians(seq_angles['testate'])
         rad_f = math.radians(seq_angles['fianchi'])
         if rad_t > 1.55: rad_t = 1.55

@@ -3,11 +3,13 @@ import math
 # --- Utility per Arrotondare gli Angoli ---
 def round_poly(points, radius=2.0, steps=3):
     """Arrotonda gli angoli di un poligono usando curve di Bezier."""
-    if len(points) < 3: return points
+    if len(points) < 3:
+        return points
     new_points = []
     n = len(points)
     
-    def dist(p1, p2): return math.hypot(p1[0]-p2[0], p1[1]-p2[1])
+    def dist(p1, p2):
+        return math.hypot(p1[0]-p2[0], p1[1]-p2[1])
 
     for i in range(n):
         p_prev = points[i-1]
@@ -29,7 +31,8 @@ def round_poly(points, radius=2.0, steps=3):
         d2 = math.hypot(v2_x, v2_y)
         
         if d1 == 0 or d2 == 0:
-            new_points.append(p_curr); continue
+            new_points.append(p_curr)
+            continue
 
         n1 = (v1_x/d1, v1_y/d1)
         n2 = (v2_x/d2, v2_y/d2)
@@ -67,8 +70,10 @@ class BoxComponent:
         self.layout_rot = 0
         self.custom_offset = custom_offset 
         
-        if parent: parent.add_child(self, attachment)
-        else: self.generate_shape()
+        if parent:
+            parent.add_child(self, attachment)
+        else:
+            self.generate_shape()
 
     def add_child(self, child, edge):
         self.children.append(child)
@@ -76,48 +81,83 @@ class BoxComponent:
         
         if self.name == "Fondo":
             if edge == 'top':
-                child.pivot_3d = (0, -gh/2, 0); child.pre_rot_z = 0 
-                child.fold_axis = 'x'; child.fold_multiplier = -1 
-                child.layout_pos = (0, -gh/2); child.layout_rot = 0
+                child.pivot_3d = (0, -gh/2, 0)
+                child.pre_rot_z = 0 
+                child.fold_axis = 'x'
+                child.fold_multiplier = -1 
+                child.layout_pos = (0, -gh/2)
+                child.layout_rot = 0
             elif edge == 'bottom':
-                child.pivot_3d = (0, gh/2, 0); child.pre_rot_z = 180 
-                child.fold_axis = 'x'; child.fold_multiplier = 1 
-                child.layout_pos = (0, gh/2); child.layout_rot = 180
+                child.pivot_3d = (0, gh/2, 0)
+                child.pre_rot_z = 180 
+                child.fold_axis = 'x'
+                child.fold_multiplier = 1 
+                child.layout_pos = (0, gh/2)
+                child.layout_rot = 180
             elif edge == 'left':
-                child.pivot_3d = (-gw/2, 0, 0); child.pre_rot_z = -90 
-                child.fold_axis = 'y'; child.fold_multiplier = 1 
-                child.layout_pos = (-gw/2, 0); child.layout_rot = -90 
+                child.pivot_3d = (-gw/2, 0, 0)
+                child.pre_rot_z = -90 
+                child.fold_axis = 'y'
+                child.fold_multiplier = 1 
+                child.layout_pos = (-gw/2, 0)
+                child.layout_rot = -90 
             elif edge == 'right':
-                child.pivot_3d = (gw/2, 0, 0); child.pre_rot_z = 90 
-                child.fold_axis = 'y'; child.fold_multiplier = -1 
-                child.layout_pos = (gw/2, 0); child.layout_rot = 90 
+                child.pivot_3d = (gw/2, 0, 0)
+                child.pre_rot_z = 90 
+                child.fold_axis = 'y'
+                child.fold_multiplier = -1 
+                child.layout_pos = (gw/2, 0)
+                child.layout_rot = 90 
         else:
             if edge == 'bottom': 
                 child.pivot_3d = (0, -gh, 0)
-                child.pre_rot_z = 0; child.fold_axis = 'x'; child.fold_multiplier = -1
-                child.layout_pos = (0, -gh); child.layout_rot = 0
+                child.pre_rot_z = 0
+                child.fold_axis = 'x'
+                child.fold_multiplier = -1
+                child.layout_pos = (0, -gh)
+                child.layout_rot = 0
             elif edge == 'left': 
-                child.pivot_3d = (-gw/2, -gh/2, 0); child.pre_rot_z = -90; child.fold_axis = 'y'; child.fold_multiplier = 1
-                child.layout_pos = (-gw/2, -gh/2); child.layout_rot = -90
+                child.pivot_3d = (-gw/2, -gh/2, 0)
+                child.pre_rot_z = -90
+                child.fold_axis = 'y'
+                child.fold_multiplier = 1
+                child.layout_pos = (-gw/2, -gh/2)
+                child.layout_rot = -90
             elif edge == 'right': 
-                child.pivot_3d = (gw/2, -gh/2, 0); child.pre_rot_z = 90; child.fold_axis = 'y'; child.fold_multiplier = -1
-                child.layout_pos = (gw/2, -gh/2); child.layout_rot = 90
+                child.pivot_3d = (gw/2, -gh/2, 0)
+                child.pre_rot_z = 90
+                child.fold_axis = 'y'
+                child.fold_multiplier = -1
+                child.layout_pos = (gw/2, -gh/2)
+                child.layout_rot = 90
             elif edge == 'leg_left':
                 sh = getattr(self, 'shoulder_val', 20)
                 cx_parent = -gw/2 + sh/2
                 cx = cx_parent - child.custom_offset
-                child.pivot_3d = (cx, -gh, 0); child.pre_rot_z = 0; child.fold_axis = 'x'; child.fold_multiplier = -1
-                child.layout_pos = (cx, -gh); child.layout_rot = 0
+                child.pivot_3d = (cx, -gh, 0)
+                child.pre_rot_z = 0
+                child.fold_axis = 'x'
+                child.fold_multiplier = -1
+                child.layout_pos = (cx, -gh)
+                child.layout_rot = 0
             elif edge == 'leg_right':
                 sh = getattr(self, 'shoulder_val', 20)
                 cx_parent = gw/2 - sh/2
                 cx = cx_parent + child.custom_offset
-                child.pivot_3d = (cx, -gh, 0); child.pre_rot_z = 0; child.fold_axis = 'x'; child.fold_multiplier = -1
-                child.layout_pos = (cx, -gh); child.layout_rot = 0
+                child.pivot_3d = (cx, -gh, 0)
+                child.pre_rot_z = 0
+                child.fold_axis = 'x'
+                child.fold_multiplier = -1
+                child.layout_pos = (cx, -gh)
+                child.layout_rot = 0
             elif edge == 'reinf_attach':
                 hl = getattr(self, 'h_low_val', self.height*0.6)
-                child.pivot_3d = (0, -hl, 0); child.pre_rot_z = 0; child.fold_axis = 'x'; child.fold_multiplier = -1
-                child.layout_pos = (0, -hl); child.layout_rot = 0
+                child.pivot_3d = (0, -hl, 0)
+                child.pre_rot_z = 0
+                child.fold_axis = 'x'
+                child.fold_multiplier = -1
+                child.layout_pos = (0, -hl)
+                child.layout_rot = 0
         
         child.generate_shape()
 
@@ -137,8 +177,10 @@ class BoxComponent:
             x, y, z = v
             rx, ry = x*cp - y*sp, x*sp + y*cp
             rz = z
-            if self.fold_axis == 'x': yf, zf, xf = ry*cf - rz*sf, ry*sf + rz*cf, rx
-            else: xf, zf, yf = rx*cf + rz*sf, -rx*sf + rz*cf, ry
+            if self.fold_axis == 'x': 
+                yf, zf, xf = ry*cf - rz*sf, ry*sf + rz*cf, rx
+            else: 
+                xf, zf, yf = rx*cf + rz*sf, -rx*sf + rz*cf, ry
             return (xf + self.pivot_3d[0], yf + self.pivot_3d[1], zf + self.pivot_3d[2])
             
         if parent_tm is None: return lambda v: local_tm(v)
@@ -288,27 +330,35 @@ class Testata(BoxComponent):
         self.polygon = round_poly(pts, 2.0)
 
 class Lembo(BoxComponent):
-    def __init__(self, name, w, h, t, p, edge, is_angle=False):
+    def __init__(self, name, w, h, t, p, edge, is_angle=False, angle_pars={}):
         self.is_angle = is_angle
-        # Nella logica BoxComponent:
-        # width = dimensione parallela all'attacco (lunghezza lungo il lato della scatola)
-        # height = dimensione perpendicolare (estensione del lembo F)
+        # h qui è F (Totale)
+        actual_h = h
         
-        # Se is_angle=True, dividiamo l'estensione (h) in 3 sezioni consecutive.
-        actual_h = h / 3.0 if is_angle else h 
+        if self.is_angle:
+            # Recupera i parametri 
+            h_tot = h
+            h1 = angle_pars.get('h', h_tot/3.0) # Sezione 1 (Vicino) - "Altezza Angolo"
+            h3 = angle_pars.get('b', h_tot/3.0) # Sezione 3 (Estremità) - "Base Angolo"
+            
+            # Calcola l'ipotenusa
+            h2 = h_tot - h1 - h3 
+            if h2 < 1.0: 
+                h1 = h2 = h3 = h_tot/3.0 # Fallback se i parametri sono impossibili
+            
+            # Assegna h1 a 'self' (Sezione 1)
+            actual_h = h1
         
         super().__init__(name, w, actual_h, t, p, edge, 'lembi')
         
-        if self.is_angle:
-            # Creiamo la catena: Self -> Sec2 -> Sec3
-            # Sec2 si attacca al 'bottom' di Self (che è l'estremità esterna)
+        if self.is_angle and 'h2' in locals():
+            # Creiamo la catena: Self(h1) -> Sec2(h2) -> Sec3(h3)
+            # Sec2 si attacca al 'bottom' di Self
+            sec2 = BoxComponent(f"{name}_2", w, h2, t, self, 'bottom', 'lembi')
             # Sec3 si attacca al 'bottom' di Sec2
-            
-            sec2 = BoxComponent(f"{name}_2", w, actual_h, t, self, 'bottom', 'lembi')
-            sec3 = BoxComponent(f"{name}_3", w, actual_h, t, sec2, 'bottom', 'lembi')
+            sec3 = BoxComponent(f"{name}_3", w, h3, t, sec2, 'bottom', 'lembi')
 
     def generate_shape(self):
-        # Forma standard rettangolare (modificata solo nelle dimensioni dal costruttore)
         w, h = self.width, self.height
         pts = [(w/2, 0), (w/2, -h), (-w/2, -h), (-w/2, 0)]
         self.polygon = round_poly(pts, 2.0)
@@ -345,13 +395,17 @@ class BoxManager:
         
         # LEMBI E PIATTAFORMA
         is_angle = p.get('lembi_angle', False)
+        # Passiamo i parametri dell'angolo
+        ang_pars = {'h': p.get('angle_h', 40), 'b': p.get('angle_b', 40)}
+        
         for t in [tl, tr]:
-            l1 = Lembo(f"{t.name}_L1", HL, F, T, t, 'left', is_angle=is_angle); l1.fold_axis = 'y'
-            l2 = Lembo(f"{t.name}_L2", HL, F, T, t, 'right', is_angle=is_angle); l2.fold_axis = 'y'
+            l1 = Lembo(f"{t.name}_L1", HL, F, T, t, 'left', is_angle=is_angle, angle_pars=ang_pars)
+            l1.fold_axis = 'y'
+            l2 = Lembo(f"{t.name}_L2", HL, F, T, t, 'right', is_angle=is_angle, angle_pars=ang_pars)
+            l2.fold_axis = 'y'
             
             if p.get('platform_active'):
                 fh, ext_w = p.get('fascia_h', 30), p.get('plat_flap_w', 30)
-                # MODIFICA: Dividi fasce se c'è lo scasso (ferro), indipendentemente dal raddoppio
                 if st == 'ferro':
                     cutout = t.pars['cutout_w']
                     sh_fascia = (WF - cutout) / 2
@@ -377,26 +431,18 @@ class BoxManager:
             for i in range(len(pts)): cut_lines.append([pts[i], pts[(i+1)%len(pts)]])
         
         # --- FILTRO LINEE DI TAGLIO (Per opzione "One Unit") ---
-        # Se una linea di taglio coincide con una linea di cordonatura, 
-        # significa che è una linea interna tra sezioni. La rimuoviamo dai tagli.
+        # Rimuove le linee di taglio che coincidono con le cordonature interne
         final_cuts = []
         for p1, p2 in cut_lines:
             is_overlap = False
             for cp1, cp2 in creases:
-                # Controlla se il segmento p1-p2 corrisponde a cp1-cp2 (o inverso)
-                # Tolleranza 1.0 per float error
                 d1 = math.hypot(p1[0]-cp1[0], p1[1]-cp1[1])
                 d2 = math.hypot(p2[0]-cp2[0], p2[1]-cp2[1])
-                
                 d3 = math.hypot(p1[0]-cp2[0], p1[1]-cp2[1])
                 d4 = math.hypot(p2[0]-cp1[0], p2[1]-cp1[1])
-                
                 if (d1 < 1.0 and d2 < 1.0) or (d3 < 1.0 and d4 < 1.0):
-                    is_overlap = True
-                    break
-            
-            if not is_overlap:
-                final_cuts.append([p1, p2])
+                    is_overlap = True; break
+            if not is_overlap: final_cuts.append([p1, p2])
 
         glue_lines = []
         if p:
@@ -418,7 +464,6 @@ class BoxManager:
                     ptype = poly['type']
                     pid = poly['id']
                     
-                    # 1. Filtro Aree Ammesse
                     is_valid = False
                     if ptype == 'fianchi': is_valid = True
                     elif ptype == 'testate': is_valid = True
@@ -428,7 +473,6 @@ class BoxManager:
                     
                     if not is_valid: continue
                     
-                    # 2. Intersezione Geometrica Linea-Poligono
                     pts = poly['coords']
                     intersections = []
                     for i in range(len(pts)):
@@ -442,63 +486,39 @@ class BoxManager:
                     intersections.sort()
                     if not intersections: continue
 
-                    # 3. Creazione Segmenti con Margine 5mm
                     for k in range(0, len(intersections)-1, 2):
                         x_start = intersections[k] + 5.0
                         x_end = intersections[k+1] - 5.0
                         
                         if x_start >= x_end: continue
                         
-                        # 4. SPLIT SU FIANCATE (Separazione Spalle + Lunghezza Lembo F + Scalatura Gap)
                         if ptype == 'fianchi':
-                            # Determina il GAP (Scalatura) in base alla traccia (già deciso: 5, 5, 20, 30)
                             gap_val = 5.0
                             if track_idx == 2: gap_val = 20.0
                             elif track_idx == 3: gap_val = 30.0
                             
-                            # La zona centrale "vuota" è [-cutout/2, +cutout/2]
                             c_half = f_cutout / 2
-                            
-                            # --- LIMITI FISICI TEORICI BASATI SU F (Lunghezza Lembi) ---
-                            # Il limite esterno è determinato dalla geometria TEORICA della fiancata (L), non dallo scasso.
-                            # Le fiancate sono centrate su X=0 e larghe L.
-                            # Bordo Sinistro Teorico = -L/2. Bordo Destro Teorico = +L/2.
-                            # Limite Sinistro Validità = -L/2 + F - gap_val
-                            # Limite Destro Validità = +L/2 - F + gap_val
-                            
-                            # RIPRISTINO USO ESPLICITO DI F (Lunghezza Lembo) come richiesto
                             limit_left_max = -L/2 + F - gap_val
                             limit_right_min = L/2 - F + gap_val
 
-                            # --- LIMITI SCASSO CENTRALE (Solo se FERRO) ---
                             use_center_limit = (p.get('fianchi_shape') == 'ferro')
                             limit_center_L = -c_half - gap_val
                             limit_center_R = c_half + gap_val
                             
-                            # Spalla Sinistra
                             actual_L_end = limit_left_max
-                            if use_center_limit:
-                                actual_L_end = min(actual_L_end, limit_center_L)
-                            
-                            # Clip al segmento fisico (x_end)
-                            # Se lo scasso (platform) ha spostato x_start in avanti, il tratto sarà corto
-                            # e finirà comunque a limit_left_max.
+                            if use_center_limit: actual_L_end = min(actual_L_end, limit_center_L)
                             actual_L_end = min(x_end, actual_L_end)
                             
                             if x_start < actual_L_end:
                                 valid_segments.append( ([(x_start, y_val), (actual_L_end, y_val)], pid) )
                                 
-                            # Spalla Destra
                             actual_R_start = limit_right_min
-                            if use_center_limit:
-                                actual_R_start = max(actual_R_start, limit_center_R)
-                            
+                            if use_center_limit: actual_R_start = max(actual_R_start, limit_center_R)
                             actual_R_start = max(x_start, actual_R_start)
                             
                             if actual_R_start < x_end:
                                 valid_segments.append( ([(actual_R_start, y_val), (x_end, y_val)], pid) )
                         else:
-                            # Caso Standard (Testate, Lembi, o Fianchi Rettangolari)
                             valid_segments.append( ([(x_start, y_val), (x_end, y_val)], pid) )
                             
                 return valid_segments
@@ -510,29 +530,18 @@ class BoxManager:
                 
                 l_outer = limit_reinf if limit_reinf is not None else limit_fianco
                 
-                # SE PIATTAFORMA DISATTIVATA: DISTRIBUZIONE EQUA (Step 3)
                 if limit_flap is None:
-                    # Margini: 5mm da esterno, 15mm da interno (piega)
                     p_start = l_outer + (5 * direction)
                     p_end = limit_inner - (15 * direction)
-                    
-                    # Step per 4 linee equamente distribuite
                     step = (p_end - p_start) / 3.0
                     candidates = [p_start + (step * i) for i in range(4)]
-                
                 else:
-                    # LOGICA STANDARD CON PRIORITÀ (Se Platform è ATTIVA)
-                    # GRUPPO 1: RADDOPPI/FIANCATA (Priorità 1)
                     t1 = l_outer + (5 * direction)
                     t2 = t1 + (15 * direction)
-                    candidates.append(t1)
-                    candidates.append(t2)
-                    
-                    # GRUPPO 2: LEMBI PLATFORM (Priorità 2)
+                    candidates.append(t1); candidates.append(t2)
                     t3 = limit_flap + (5 * direction)
                     t4 = t3 + (15 * direction)
-                    candidates.append(t3)
-                    candidates.append(t4)
+                    candidates.append(t3); candidates.append(t4)
                     
                     if direction == 1: candidates.sort()
                     else: candidates.sort(reverse=True)
@@ -543,13 +552,9 @@ class BoxManager:
                         for c in candidates[1:]:
                             if abs(c - merged[-1]) > 2.0: merged.append(c)
                     candidates = merged
-                    
-                    while len(candidates) < 4:
-                         candidates.append(candidates[-1] + (15 * direction))
+                    while len(candidates) < 4: candidates.append(candidates[-1] + (15 * direction))
 
                 final_y = candidates[:4]
-
-                # Spaziatura Minima e Safe Limit (Post-processing)
                 for i in range(1, 4):
                     prev, curr = final_y[i-1], final_y[i]
                     if abs(curr - prev) < 10.0: final_y[i] = prev + (10 * direction)
@@ -561,11 +566,8 @@ class BoxManager:
                          final_y[2] = final_y[3] - (10 * direction)
                          if abs(final_y[2] - final_y[1]) < 10.0:
                               final_y[1] = final_y[2] - (10 * direction)
-
                 return final_y
 
-            # --- ESECUZIONE ---
-            # Lato ALTO
             y_top_inner = -W/2
             y_top_reinf = -(W/2 + h_low + r_h) if r_active else None
             y_top_fianco = -(W/2 + HF) 
@@ -573,7 +575,6 @@ class BoxManager:
             
             Ys_top = calculate_positions(y_top_inner, y_top_fianco, y_top_reinf, y_top_flap)
             
-            # Lato BASSO
             y_btm_inner = W/2
             y_btm_reinf = (W/2 + h_low + r_h) if r_active else None
             y_btm_fianco = W/2 + HF
@@ -584,7 +585,6 @@ class BoxManager:
             for i in range(4):
                 segs_top = generate_valid_segments(Ys_top[i], polys, i)
                 for (seg, pid) in segs_top: glue_lines.append((seg, i, pid))
-                
                 segs_btm = generate_valid_segments(Ys_btm[i], polys, i)
                 for (seg, pid) in segs_btm: glue_lines.append((seg, i, pid))
 
@@ -592,11 +592,25 @@ class BoxManager:
 
     def set_angles(self, angles):
         def visit(n):
-            if "Reinf" in n.name: n.fold_angle = angles.get('reinf', 0)
-            elif n.label == 'fasce': n.fold_angle = angles.get('fasce', 0)
-            elif n.label == 'ext': n.fold_angle = angles.get('ext', 0)
-            elif n.label == 'lembi': n.fold_angle = angles.get('lembi', 0)
-            elif n.label == 'testate': n.fold_angle = angles.get('testate', 0)
-            elif n.label == 'fianchi': n.fold_angle = angles.get('fianchi', 0)
+            if "Reinf" in n.name: 
+                n.fold_angle = angles.get('reinf', 0)
+            elif n.label == 'fasce': 
+                n.fold_angle = angles.get('fasce', 0)
+            elif n.label == 'ext': 
+                n.fold_angle = angles.get('ext', 0)
+            elif n.label == 'lembi': 
+                # Se è la sezione 3 (fondo/base)
+                if n.name.endswith('_3'): 
+                    n.fold_angle = angles.get('lembi_3', 0)
+                # Se è la sezione 2 (ipotenusa)
+                elif n.name.endswith('_2'): 
+                    n.fold_angle = angles.get('lembi_2', 0)
+                # Altrimenti è l'attacco
+                else: 
+                    n.fold_angle = angles.get('lembi', 0)
+            elif n.label == 'testate': 
+                n.fold_angle = angles.get('testate', 0)
+            elif n.label == 'fianchi': 
+                n.fold_angle = angles.get('fianchi', 0)
             for c in n.children: visit(c)
         if self.root: visit(self.root)

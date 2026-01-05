@@ -77,7 +77,7 @@ class DrawingArea2D(QWidget):
         for p1, p2 in self.crease_lines: painter.drawLine(to_s(*p1), to_s(*p2))
 
 
-# --- CLASSE PARAMETRI (Rimane invariata) ---
+# --- CLASSE PARAMETRI ---
 class ParameterPanel(QWidget):
     params_changed = Signal(dict)
 
@@ -105,16 +105,28 @@ class ParameterPanel(QWidget):
         self.inp_L = self._make_spin(300, 10, 2000)
         self.inp_W = self._make_spin(200, 10, 2000)
         self.inp_T = self._make_spin(5, 1, 20)
-        self.inp_F = self._make_spin(85, 10, 200) 
+        self.inp_F = self._make_spin(120, 10, 300) 
+        
+        # --- Modifica: Checkbox e Inputs Angolo ---
         self.chk_lembi_angle = QCheckBox("Angolo (3 Sezioni)")
-        self.chk_lembi_angle.setStyleSheet("color: white;")
+        self.chk_lembi_angle.setStyleSheet("color: white; font-weight: bold;")
+        self.chk_lembi_angle.stateChanged.connect(self.update_ui_state)
         self.chk_lembi_angle.stateChanged.connect(self.emit_change)
+
+        self.inp_ang_h = self._make_spin(40, 1, 200) # Altezza Angolo (Sezione 1)
+        self.inp_ang_b = self._make_spin(40, 1, 200) # Base Angolo (Sezione 3)
+        self.lbl_ang_h = QLabel("   H Angolo (S1):")
+        self.lbl_ang_b = QLabel("   Base Angolo (S3):")
         
         form_dim.addRow("Lunghezza (L):", self.inp_L)
         form_dim.addRow("Larghezza (W):", self.inp_W)
         form_dim.addRow("Spessore (T):", self.inp_T)
         form_dim.addRow("Lembi Incolla (F):", self.inp_F)
         form_dim.addRow(self.chk_lembi_angle)
+        # Aggiungo le righe per i parametri dell'angolo (verranno nascoste/mostrate da update_ui_state)
+        form_dim.addRow(self.lbl_ang_h, self.inp_ang_h)
+        form_dim.addRow(self.lbl_ang_b, self.inp_ang_b)
+
         gb_dim.setLayout(form_dim)
         vbox.addWidget(gb_dim)
 
@@ -197,6 +209,11 @@ class ParameterPanel(QWidget):
         }
 
     def update_ui_state(self):
+        # --- Modifica: Gestione Visibilità Parametri Angolo ---
+        is_angle = self.chk_lembi_angle.isChecked()
+        self.inp_ang_h.setVisible(is_angle); self.lbl_ang_h.setVisible(is_angle)
+        self.inp_ang_b.setVisible(is_angle); self.lbl_ang_b.setVisible(is_angle)
+
         # LOGICA FIANCHI
         is_ferro_f = (self.fianchi_panel['shape'].currentText() == "Ferro di Cavallo")
         is_plat = self.chk_plat.isChecked()
@@ -229,7 +246,11 @@ class ParameterPanel(QWidget):
             'W': self.inp_W.value(),
             'thickness': self.inp_T.value(),
             'F': self.inp_F.value(),
+            
+            # --- Modifica: Invio nuovi parametri ---
             'lembi_angle': self.chk_lembi_angle.isChecked(),
+            'angle_h': self.inp_ang_h.value(),
+            'angle_b': self.inp_ang_b.value(),
             
             # Fianchi
             'h_fianchi': self.fianchi_panel['h'].value(),
