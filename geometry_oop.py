@@ -417,6 +417,7 @@ class BoxManager:
                             # Limite Sinistro Validità = -L/2 + F - gap_val
                             # Limite Destro Validità = +L/2 - F + gap_val
                             
+                            # RIPRISTINO USO ESPLICITO DI F (Lunghezza Lembo) come richiesto
                             limit_left_max = -L/2 + F - gap_val
                             limit_right_min = L/2 - F + gap_val
 
@@ -460,8 +461,8 @@ class BoxManager:
                 
                 l_outer = limit_reinf if limit_reinf is not None else limit_fianco
                 
-                # SE PIATTAFORMA DISATTIVATA OPPURE RADDOPPI DISATTIVATI: DISTRIBUZIONE EQUA
-                if limit_flap is None or limit_reinf is None:
+                # SE PIATTAFORMA DISATTIVATA: DISTRIBUZIONE EQUA (Step 3)
+                if limit_flap is None:
                     # Margini: 5mm da esterno, 15mm da interno (piega)
                     p_start = l_outer + (5 * direction)
                     p_end = limit_inner - (15 * direction)
@@ -471,7 +472,7 @@ class BoxManager:
                     candidates = [p_start + (step * i) for i in range(4)]
                 
                 else:
-                    # LOGICA STANDARD CON PRIORITÀ (SOLO SE C'È SIA PLATFORM CHE RADDOPPI)
+                    # LOGICA STANDARD CON PRIORITÀ (Se Platform è ATTIVA)
                     # GRUPPO 1: RADDOPPI/FIANCATA (Priorità 1)
                     t1 = l_outer + (5 * direction)
                     t2 = t1 + (15 * direction)
